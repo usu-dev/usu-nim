@@ -1,0 +1,10 @@
+/public
+
+/src/**/*
+!/src/**/
+!/src/**/*.*
+/tests/**/*
+!/tests/**/
+!/tests/**/*.*
+
+

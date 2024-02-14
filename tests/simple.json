@@ -1,0 +1,10 @@
+{
+  "title": "A Simple Usu Document",
+  "description": "testable base case for usu-nim library and binary\nfor more robust tests please see the official suite",
+  "steps": {
+    "one": "First Step",
+    "two": "Second Step",
+    "three": "Third Step"
+  },
+  "numbers": ["1", "2", "3", "4", "5"]
+}
