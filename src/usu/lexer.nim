@@ -61,7 +61,7 @@ proc lexUnquoted(pos: var int, input: string, tokens: var seq[Token],
 
   var str = ""
   let strEnd = {':', ')'} + (
-    if InlineString in modes: {' ', '\n'}
+    if InlineString in modes and tokens[^1].kind != tokKey: {' ', '\n'}
     elif tokens[^1].kind == tokKey: {'\x00'}
     else: {'\n'}
   )
@@ -83,15 +83,16 @@ proc lexUnquoted(pos: var int, input: string, tokens: var seq[Token],
   tokens.add Token(kind: tokString, stringVal: str)
   modes.excl {RespectNewlines, ChompNewlines}
 
-proc debugUsu(pos: int, input: string, modes: set[LexerMode]) =
-  for i, c in input:
-    if pos == i:
-      stdout.write("!>>>>")
-      stdout.write(c)
-      stdout.write("<<<<!")
-    else:
-      stdout.write(c)
-  stdout.write("\n^^^^" & $modes & "^^^^^\n")
+when defined(debugUsu):
+  proc debugUsu(pos: int, input: string, modes: set[LexerMode]) =
+    for i, c in input:
+      if pos == i:
+        stdout.write("!>>>>")
+        stdout.write(c)
+        stdout.write("<<<<!")
+      else:
+        stdout.write(c)
+    stdout.write("\n^^^^" & $modes & "^^^^^\n")
 
 proc lex*(input: string): seq[Token] =
   var pos = 0
@@ -108,7 +109,7 @@ proc lex*(input: string): seq[Token] =
 
   while pos < input.len:
     pos = skip(pos, input, modes)
-    when defined(debug):
+    when defined(debugUsu):
       debugUsu(pos,input, modes)
     case current
     of '#':

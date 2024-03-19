@@ -115,12 +115,9 @@ proc parseUsu*(input: string): UsuNode =
 
 when isMainModule:
   const input = """
-:dirs (
-  :key value
-)
-
+:key value with spaces
 :sessions (
-  (:name protocol :dir /home/daylin/stuff/writing/clonmapper-protocol)
+  (:name a protocol with spaces)
 )
 """
   echo lex(input)
