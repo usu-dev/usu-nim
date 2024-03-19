@@ -72,17 +72,21 @@ proc parseArray(tokens: var Deque[Token]): UsuNode =
   var currTok: Token
   result = UsuNode(kind: UsuArray)
   while true:
-    currTok = pop tokens
-    case currTok.kind
-    of tokString:
-      result.elems.add parseString(currTok)
-    of tokLPar:
+    # parse node including opening paranthesis
+    if tokens.peekFirst.kind == tokLPar:
       result.elems.add parse(tokens)
-    of tokRPar: break
-    of tokKey:
-      raise newException(UsuParserError, "Unexpected key:" & $currTok.keyVal & ", while parsing array")
-    of tokEnd:
-      raise newException(UsuParserError, "reached EOF: expected closing paren")
+    else:
+      currTok = pop tokens
+      case currTok.kind
+      of tokString:
+        result.elems.add parseString(currTok)
+      of tokRPar: break
+      of tokLPar:
+        raise newException(UsuParserError, "Unexpected opening paranthesis:")
+      of tokKey:
+        raise newException(UsuParserError, "Unexpected key:" & $currTok.keyVal & ", while parsing array")
+      of tokEnd:
+        raise newException(UsuParserError, "reached EOF: expected closing paren")
 
 
 proc parse(tokens: var Deque[Token]): UsuNode =
@@ -92,12 +96,10 @@ proc parse(tokens: var Deque[Token]): UsuNode =
       case tokens.peekFirst.kind
       of tokKey:
         return parseMap(tokens)
-      of tokString:
+      of tokString, tokLPar:
         return parseArray(tokens)
-      of tokRPar:
+      of tokRPar: # empty array
         return UsuNode(kind: UsuArray)
-      of tokLPar:
-        return parse(tokens)
       else: raise newException(UsuParserError, "else error" & $token)
     of tokRpar:
       raise newException(UsuParserError, "Unexpected closing paren")
@@ -114,9 +116,7 @@ proc parseUsu*(input: string): UsuNode =
 when isMainModule:
   const input = """
 :dirs (
-  /home/daylin/dev/github/daylinmorgan/
-  /home/daylin/dev/github/usu-dev/
-  /home/daylin/dev/github/forks/
+  :key value
 )
 
 :sessions (
