@@ -4,6 +4,11 @@ task test, "run tests":
   selfExec "c -r tests/tusu.nim"
   selfExec "c -r tests/tofficial.nim"
 
+task build, "build binary":
+  selfExec "c --outdir:bin src/usu.nim"
+
+task buildRelease, "build release binary":
+  selfExec "c -d:release --outdir:bin src/usu.nim"
 
 task docs, "Deploy doc html + search index to public/ directory":
   let
