@@ -16,6 +16,8 @@ proc `%`*(u: UsuNode): JsonNode =
   of UsuNull:
     result = newJNull()
 
+export json
+
 when isMainModule:
   let u = parseUsu("""
 :key value
