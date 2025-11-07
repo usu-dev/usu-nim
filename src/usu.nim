@@ -3,7 +3,7 @@
 
   A simple configuration language that places type burden on the file consumer.
 ]##
-import sequtils, sets, strutils
+import std/[sequtils, sets, strutils]
 
 import usu/parser
 
