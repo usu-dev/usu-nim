@@ -1,7 +1,12 @@
 {
-  "meta": {"title": "A Simple Usu Document",
-  "description": "testable base case for usu-nim library and binary\nfor more robust tests please see the official suite",
+  "meta": {
+    "title": "A Simple Usu Document",
+    "author": "Linus",
+    "description": "testable base case for usu-nim library and binary\nfor more robust tests please see the official suite\n"
   },
+  "backtick quoted key": "backtick quoted value",
+  "single quoted key": "single quoted value",
+  "double quoted key": "double quoted value",
   "steps": {
     "one": "First Step",
     "two": "Second Step",

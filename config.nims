@@ -1,16 +1,25 @@
 import std/[os, strformat]
 
-task runTests, "run tests":
-  for f in ["usu","official","error"]:
-    selfExec fmt"c -r tests/t{f}.nim"
+task tests, "run tests":
+  selfExec "c -r tests/tester.nim"
+
+proc getTag(): string =
+  let (output, code) = gorgeEx("git describe --tags --match 'v*'")
+  if code != 0:
+    quit output
+  return output
+
+const version {.define.} = ""
 
 task docs, "Deploy doc html + search index to public/ directory":
   let
     name = "usu"
-    version = gorgeEx("git describe --tags --match 'v*'").output
+    tag =
+      when defined(version): version
+      else: getTag()
     srcFile = "src" / (name & ".nim")
     gitUrl = fmt"https://github.com/usu-dev/{name}-nim"
-  selfExec fmt"doc --project --index:on --git.url:{gitUrl} --git.commit:{version} --outdir:public {srcFile}"
+  selfExec fmt"""doc --project --index:on --git.url:{gitUrl} --git.commit:"{tag}" --outdir:public {srcFile}"""
   withDir "public":
     mvFile(name & ".html", "index.html")
     for file in walkDirRec(".", {pcFile}):

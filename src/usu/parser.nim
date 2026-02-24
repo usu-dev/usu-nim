@@ -1,4 +1,4 @@
-import std/[tables, deques, strutils]
+import std/[tables, deques, strutils, strformat]
 
 import lexer
 export tables
@@ -69,11 +69,15 @@ proc deepMerge[K, V](target: var OrderedTable[K, V], source: OrderedTable[K, V])
     else:
       target[key] = value
 
-proc nestedUpdate(node: var UsuNode, path: seq[string], value: UsuNode) =
+proc nestedUpdate(node: var UsuNode, path: seq[string], value: UsuNode, token: Token) =
   let curr = path[0]
   if path.len == 1:
     if curr in node.fields:
-      assert node.fields[curr].kind == value.kind
+      # TODO: better error
+      if node.fields[curr].kind != value.kind:
+        error(token,
+          fmt"""failed to merge values for repeated key: "{curr}", kinds must match expected: "{node.fields[curr].kind}", but got: "{value.kind}""""
+        )
       case node.fields[curr].kind:
       of UsuMap:
         node.fields[curr].fields.deepMerge(value.fields)
@@ -85,7 +89,7 @@ proc nestedUpdate(node: var UsuNode, path: seq[string], value: UsuNode) =
       node.fields[curr] = value
   else:
     if curr in node.fields:
-      node.fields[curr].nestedUpdate(path[1..^1], value)
+      node.fields[curr].nestedUpdate(path[1..^1], value, token)
     else:
       node.fields[curr] = toUsuMap(path[1..^1], value)
 
@@ -125,7 +129,7 @@ proc parseMap(tokens: var Deque[Token]): UsuNode =
         else:
           error(nextToken, suffix = "expected value")
 
-      nestedUpdate(result, paths, value)
+      nestedUpdate(result, paths, value, nextToken)
 
 proc parseArray(tokens: var Deque[Token]): UsuNode =
   var currTok: Token
@@ -169,7 +173,7 @@ when isMainModule:
   const input = """
 .key value
 """
-
   echo lex(input)
-  echo parseUsu(input)
+  var tokens = toDeque(lex(input))
+  echo parse(tokens, root = true)
 

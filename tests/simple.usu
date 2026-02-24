@@ -1,16 +1,24 @@
 #(
-  A block comment
-  could span multiple lines
+  A block comment that can span multiple lines 
 )#
 
-.meta {.title A Simple Usu Document}
-.meta.description # a nested key will be merged
+.meta { .title A Simple Usu Document .author Linus }
+
+.`backtick quoted key` `backtick quoted value`
+.'single quoted key' 'single quoted value'
+."double quoted key" "double quoted value"
+
+# a nested key will be merged with the above table
+.meta.description
   testable base case for usu-nim library and binary
   for more robust tests please see the official suite
+
 .steps {
   .one "First Step"
   .two 'Second Step'
   .three `Third Step`
 }
+
 .numbers [1 2 3] # these are actually just strings but who's counting
 .numbers [4 5 6] # arrays are appended not overwritten
+

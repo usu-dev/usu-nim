@@ -1,10 +1,7 @@
 import std/strutils
 
 const whitespaces = {' ', '\t', '\v', '\f', '\r'}
-const quotes = {'"', '\'', '`'}
-const syntax = {'{', '}','[',']','.', '>', '#'} # change
 
-# should i have an UsuParser object?
 type
   TokenKind* = enum
     tokLCurly, tokRCurly,
@@ -18,95 +15,35 @@ type
     of tokKey: keyVal*: string
     else: discard
   LexerMode = enum
-    Chomp, ChompNewlines, InlineString, RespectNewlines
+    ChompNewlines, InlineString, RespectNewlines
+  Lexer = ref object
+    input: string
+    pos: int
+    tokens: seq[Token]
+    modes: set[LexerMode]
 
-proc skip(startPos: int, input: string, modes: set[LexerMode],
-    chars = whitespaces + {'\n', '\r'}): int =
-  var pos = startPos
-  template current: char =
-    if pos < input.len: input[pos]
-    else: '\x00'
-  while current in chars:
-    inc pos
-  result =
-    if (current notin syntax + quotes) and (InlineString notin modes):
-      startPos
-    else:
-      pos
+const Quotes = {'"', '\'', '`'}
+const OpenBrackets = {'[', '{'}
+const CloseBrackets = {'}', ']'}
+const Brackets = OpenBrackets + CloseBrackets
+const Syntax = Brackets + {'.', '>', '#'}
 
-proc skipComment(pos: var int, input: string) =
-  template current: char =
-    if pos < input.len: input[pos]
-    else: '\x00'
-  template next: char =
-    if pos+1 < input.len: input[pos+1]
-    else: '\x00'
-  inc(pos)
-  if current == '(':
-    inc pos
-    while current & next != ")#": inc pos
-    inc pos
-  else:
-    while current notin {'\r', '\n'}:
-      inc pos
-    inc pos
+proc newTokKey(pos: int, val: string): Token =
+  Token(kind: tokKey, pos: pos, keyVal: val)
 
-# TODO: support more escape sequences
+proc newTokString(pos: int, val: string): Token =
+  Token(kind: tokString, pos: pos, stringVal: val)
+
+# TODO: support more escape sequences?
 proc subEscapeSeqs(s: string): string =
   result = multiReplace(
     s, {
         "\\n": "\n",
         "\\t": "\t",
-        "\\\\": "\\"
+        "\\\\": "\\",
+        "\\\"": "\""
       }
   )
-
-proc lexUnquoted(
-  pos: var int,
-  input: string,
-  tokens: var seq[Token],
-  modes: var set[LexerMode]
-) =
-  template current: char =
-    if pos < input.len: input[pos]
-    else: '\x00'
-  template prev: char =
-    if pos - 1 > 0: input[pos - 1]
-    else: '\x00'
-  template next: char =
-    if pos + 1 < input.len: input[pos + 1]
-    else: '\x00'
-  template keystart: bool =
-    current == '.' and prev in {' ', '\n', '\r'}
-  template eof: bool = current == '\x00'
-
-  var str = ""
-
-  let strEnd = {'}',']', '[', '{'} + (
-    if InlineString in modes and tokens[^1].kind != tokKey: {' ', '\n'}
-    elif tokens.len > 0 and tokens[^1].kind == tokKey: {'\x00'}
-    else: {'\n'}
-  )
-  let start = pos
-  while true:
-    if current == '#':
-      # remove any trailing whitespace before comment
-      str = strip(str, leading = false)
-      skipComment(pos, input)
-      if current == '.': break
-    else:
-      str.add(current)
-    inc pos
-    if keystart or (current in strEnd) or eof: break
- 
-  str =
-    if InlineString in modes: strip(str)
-    else: dedent(str)
-  str = strip(str, chars = whitespaces + (if RespectNewlines notin modes: {'\n', '\r'} else: {}))
-  str = subEscapeSeqs(str)
-  if ChompNewLines in modes: str = str.splitLines().join(" ")
-  tokens.add Token(pos: start, kind: tokString, stringVal: str)
-  modes.excl {RespectNewlines, ChompNewlines}
 
 when defined(debugUsu):
   proc debugUsu(pos: int, input: string, modes: set[LexerMode]) =
@@ -119,100 +56,199 @@ when defined(debugUsu):
         stdout.write(c)
     stdout.write("\n^^^^" & $modes & "^^^^^\n")
 
-func fromChar(c: char, pos: int): Token =
-  # parseEnum?
-  let kind = case c
+proc new(T: typedesc[Lexer], input: string): Lexer =
+  new(result)
+  result.input = input
+
+proc curr(l: Lexer): char {.inline.} =
+  if l.pos < l.input.len: l.input[l.pos]
+  else: '\x00'
+
+proc next(l: Lexer): char {.inline.} =
+  if l.pos+1 < l.input.len: l.input[l.pos+1]
+  else: '\x00'
+
+proc prev(l: Lexer): char {.inline.} =
+  if l.pos - 1 >= 0: l.input[l.pos-1]
+  else: '\x00'
+
+proc inc(l: var Lexer, n: Natural = 1) =
+  inc l.pos, n
+
+proc add(l: var Lexer, t: Token) =
+  l.tokens.add t
+
+proc set(l: var Lexer, mode: LexerMode) =
+  l.modes.incl mode
+
+proc drop(l: var Lexer, mode: LexerMode) =
+  l.modes.excl mode
+
+proc drop(l: var Lexer, modes: varargs[LexerMode]) =
+  for m in modes:
+    l.modes.excl m
+
+proc isSet(l: var Lexer, mode: LexerMode): bool =
+  mode in l.modes
+
+proc skip(
+  l: var Lexer,
+  chars = whitespaces + {'\n', '\r'}
+) =
+  let startPos = l.pos
+  while l.curr in chars:
+    l.inc
+  # why do I iterate then check the modes?
+  if (l.curr notin Syntax + Quotes) and not l.isSet(InlineString):
+    l.pos = startPos
+
+proc skipComment(l: var Lexer) =
+  inc l
+  if l.curr == '(':
+    inc l
+    while (l.curr & l.next) != ")#": inc l
+    inc l
+  else:
+    while l.curr notin NewLines:
+      inc l
+    inc l
+
+func addBracket(l: var Lexer) =
+  let kind = case l.curr
     of '[': tokLBracket
     of ']': tokRBracket
     of '{': tokLCurly
     of '}': tokRCurly
-    else: raise newException(ValueError, "failed to lex token, unexpected char: " & $c)
-  result = Token(pos: pos, kind: kind)
+    else: raise newException(ValueError, "failed to lex token, unexpected char: " & $l.curr)
+  l.add Token(pos: l.pos, kind: kind)
 
+func lexBracket(l: var Lexer) =
+  l.addBracket
+  l.inc
+  case l.prev:
+  of OpenBrackets:
+    if l.curr notin NewLines:
+      l.set(InlineString)
+  of CloseBrackets:
+    l.drop(InlineString)
+  of '\x00': discard
+  else: assert false
 
-proc lex*(input: string): seq[Token] =
-  var pos = 0
-  var modes: set[LexerMode]
+proc lexKey(l: var Lexer) =
+  var key = ""
+  let start = l.pos
+  l.inc
+  if l.curr in Quotes:
+    let q = l.curr
+    l.inc
+    while l.curr != q:
+      # we need to escape periods to prevent path splitting in parser
+      if l.curr == '.':
+        key.add '\\'
+      key.add(l.curr)
+      l.inc
+    l.inc
+  else:
+    while l.curr notin Newlines + {' ', '}'}:
+      key.add(l.curr)
+      l.inc
+  l.add newTokKey(start, key)
 
-  template current: char =
-    if pos < input.len: input[pos]
-    else: '\x00'
+  if l.curr == '\n':
+    l.set RespectNewlines
+  elif l.curr & l.next == " >":
+    l.set ChompNewLines
+    inc(l, 2)
 
-  template next: char =
-    if pos+1 < input.len: input[pos+1]
-    else: '\x00'
+proc lexQuotedVal(l: var Lexer) = 
+  let quote = l.curr
+  var str = ""
+  let start = l.pos
+  l.inc
+  while true:
+    str.add(l.curr)
+    if (l.next == quote and l.curr != '\\') or (l.next == quote and l.curr & l.prev == "\\\\"):
+      inc l, 2; break
+    l.inc
+  l.add newTokString(start, subEscapeSeqs(str))
 
-  while pos < input.len:
-    pos = skip(pos, input, modes)
-    when defined(debugUsu):
-      debugUsu(pos, input, modes)
-    case current
-    of '#':
-      skipComment(pos, input)
-    of '{', '[':
-      result.add fromChar(current, pos)
-      inc pos
-      if current notin {'\n', '\r'}:
-        modes.incl InlineString
-    of '}', ']':
-      result.add fromChar(current, pos)
-      inc pos
-      modes.excl InlineString
-    of '\n', '\r': inc pos
-    of '.': #TODO: lexKey proc
-      var key = ""
-      let start = pos
-      inc pos
-      if current in quotes:
-        let q = current
-        inc pos
-        while current != q:
-          # we need to escape periods to prevent path splitting in parser
-          if current == '.':
-            key.add '\\'
-          key.add(current)
-          inc pos
-        inc pos
-      else:
-        while current notin {'\r', '\n', ' ', '}'}:
-          key.add(current)
-          inc pos
-      result.add(
-        Token(pos: start, kind: tokKey, keyVal: key)
-      )
-      if current == '\n':
-        modes.incl RespectNewlines
-      elif current & next == " >":
-        modes.incl ChompNewLines
-        inc pos, 2
-    of '>':
-      # modes.incl Chomp
-      # BUG: is the fact that I skip a newline enough to initiate this somehow?
-      # it would then be turning on the "InlineString" lexing
-      inc pos
-    of '"', '\'', '`':
-      let quote = current
-      var str = ""
-      let start = pos
-      inc(pos)
-      while current != quote:
-        str.add(current)
-        inc(pos)
-      inc(pos)
-      result.add(Token(pos: start, kind: tokString, stringVal: subEscapeSeqs(str)))
+proc lexUnquotedVal(l: var Lexer) =
+
+# proc lexUnquoted(
+#   pos: var int,
+#   input: string,
+#   tokens: var seq[Token],
+#   modes: var set[LexerMode]
+# ) =
+  # template current: char =
+  #   if pos < input.len: input[pos]
+  #   else: '\x00'
+  # template prev: char =
+  #   if pos - 1 > 0: input[pos - 1]
+  #   else: '\x00'
+  # template next: char =
+  #   if pos + 1 < input.len: input[pos + 1]
+  #   else: '\x00'
+  template keystart: bool =
+    l.curr == '.' and l.prev in {' ', '\n', '\r'}
+  template eof: bool = l.curr == '\x00'
+
+  var str = ""
+
+  let strEnd = {'}',']', '[', '{'} + (
+    if l.isSet(InlineString) and l.tokens[^1].kind != tokKey: {' ', '\n'}
+    elif l.tokens.len > 0 and l.tokens[^1].kind == tokKey: {'\x00'}
+    else: {'\n'}
+  )
+  let start = l.pos
+  while true:
+    if l.curr == '#':
+      # remove any trailing whitespace before comment
+      str = strip(str, leading = false)
+      l.skipComment
+      if l.curr == '.': break
     else:
-      lexUnquoted(pos, input, result, modes)
+      str.add(l.curr)
+    l.inc
+    if keystart or (l.curr in strEnd) or eof: break
+ 
+  str =
+    if l.isSet(InlineString): strip(str)
+    else: dedent(str)
+  let newlineEnd = str.len > 0 and str[^1] in NewLines
+  str = strip(str, chars = whitespaces + NewLines)
+  str = subEscapeSeqs(str)
+  if l.isSet(ChompNewLines): str = str.splitLines().join(" ")
 
-  if result[0].kind == tokKey:
-    result = @[Token(kind: tokLCurly, pos: -1)] & result & @[Token(kind: tokRCurly, pos: pos + 1)]
+  if str != "":
+    if l.isSet(RespectNewlines) and newLineEnd:
+      str.add "\n"
+    l.add newTokString(start, str)
 
-  result.add(Token(kind: tokEnd))
+  l.drop RespectNewlines, ChompNewlines
 
-when isMainModule:
-  const input = """
-{."key with space"
-   {.`key with period.` value with a period.}}
-"""
 
-  echo lex(input)
+proc lex*(l: var Lexer) =
+  while l.pos < l.input.len:
+    skip l
+    when defined(debugUsu):
+      debugUsu(l.pos, l.input, l.modes)
+    case l.curr
+    of '#': skipComment l
+    of Brackets: l.lexBracket
+    of Newlines: l.inc
+    of '.': l.lexKey
+    of '>': l.inc # skipping this newline will in effect activate InlineString
+    of Quotes: l.lexQuotedVal
+    else: l.lexUnquotedVal
+
+  if l.tokens[0].kind == tokKey:
+    l.tokens = @[Token(kind: tokLCurly, pos: -1)] & l.tokens & @[Token(kind: tokRCurly, pos: l.pos + 1)]
+
+  l.add Token(kind: tokEnd)
+
+proc lex*(s: string): seq[Token] =
+  var lexer = Lexer.new(s)
+  lexer.lex()
+  result = lexer.tokens
 
