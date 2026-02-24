@@ -2,7 +2,6 @@ import std/[json, tables]
 
 import parser
 
-
 proc `%`*(u: UsuNode): JsonNode =
   case u.kind
   of UsuMap:
@@ -17,10 +16,3 @@ proc `%`*(u: UsuNode): JsonNode =
     result = newJNull()
 
 export json
-
-when isMainModule:
-  let u = parseUsu("""
-:key value
-:another-key (several values)
-""")
-  echo %u

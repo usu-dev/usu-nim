@@ -1,6 +1,6 @@
 import std/[os, strformat]
 
-task test, "run tests":
+task runTests, "run tests":
   for f in ["usu","official","error"]:
     selfExec fmt"c -r tests/t{f}.nim"
 

@@ -1,15 +1,18 @@
 import std/strutils
 
-const whitespaces = {' ', '\t', '\v', '\r', '\l', '\f'}
+const whitespaces = {' ', '\t', '\v', '\f', '\r'}
 const quotes = {'"', '\'', '`'}
-const syntax = {'(', ')', ':', '>', '#'}
+const syntax = {'{', '}','[',']','.', '>', '#'} # change
 
+# should i have an UsuParser object?
 type
   TokenKind* = enum
-    tokLPar, tokRPar,
+    tokLCurly, tokRCurly,
+    tokLBracket, tokRBracket
     tokKey, tokString,
     tokEnd
   Token* = object
+    pos*: int ## start position of the token
     case kind*: TokenKind
     of tokString: stringVal*: string
     of tokKey: keyVal*: string
@@ -49,38 +52,60 @@ proc skipComment(pos: var int, input: string) =
     inc pos
 
 # TODO: support more escape sequences
-proc subEscapeSeqs(s: string): string = 
-  result = replace(s, "\\n", "\n")
+proc subEscapeSeqs(s: string): string =
+  result = multiReplace(
+    s, {
+        "\\n": "\n",
+        "\\t": "\t",
+        "\\\\": "\\"
+      }
+  )
 
-
-proc lexUnquoted(pos: var int, input: string, tokens: var seq[Token],
-    modes: var set[LexerMode]) =
+proc lexUnquoted(
+  pos: var int,
+  input: string,
+  tokens: var seq[Token],
+  modes: var set[LexerMode]
+) =
   template current: char =
     if pos < input.len: input[pos]
     else: '\x00'
+  template prev: char =
+    if pos - 1 > 0: input[pos - 1]
+    else: '\x00'
+  template next: char =
+    if pos + 1 < input.len: input[pos + 1]
+    else: '\x00'
+  template keystart: bool =
+    current == '.' and prev in {' ', '\n', '\r'}
+  template eof: bool = current == '\x00'
 
   var str = ""
-  let strEnd = {':', ')'} + (
+
+  let strEnd = {'}',']', '[', '{'} + (
     if InlineString in modes and tokens[^1].kind != tokKey: {' ', '\n'}
-    elif tokens[^1].kind == tokKey: {'\x00'}
+    elif tokens.len > 0 and tokens[^1].kind == tokKey: {'\x00'}
     else: {'\n'}
   )
-  while current notin strEnd:
+  let start = pos
+  while true:
     if current == '#':
       # remove any trailing whitespace before comment
       str = strip(str, leading = false)
       skipComment(pos, input)
+      if current == '.': break
     else:
       str.add(current)
     inc pos
+    if keystart or (current in strEnd) or eof: break
+ 
   str =
     if InlineString in modes: strip(str)
     else: dedent(str)
-  str = strip(str, chars = whitespaces + {'\n', '\r'})
+  str = strip(str, chars = whitespaces + (if RespectNewlines notin modes: {'\n', '\r'} else: {}))
   str = subEscapeSeqs(str)
-  if RespectNewlines in modes: str.add '\n'
   if ChompNewLines in modes: str = str.splitLines().join(" ")
-  tokens.add Token(kind: tokString, stringVal: str)
+  tokens.add Token(pos: start, kind: tokString, stringVal: str)
   modes.excl {RespectNewlines, ChompNewlines}
 
 when defined(debugUsu):
@@ -94,9 +119,19 @@ when defined(debugUsu):
         stdout.write(c)
     stdout.write("\n^^^^" & $modes & "^^^^^\n")
 
+func fromChar(c: char, pos: int): Token =
+  # parseEnum?
+  let kind = case c
+    of '[': tokLBracket
+    of ']': tokRBracket
+    of '{': tokLCurly
+    of '}': tokRCurly
+    else: raise newException(ValueError, "failed to lex token, unexpected char: " & $c)
+  result = Token(pos: pos, kind: kind)
+
+
 proc lex*(input: string): seq[Token] =
   var pos = 0
-  var level = 0
   var modes: set[LexerMode]
 
   template current: char =
@@ -110,30 +145,40 @@ proc lex*(input: string): seq[Token] =
   while pos < input.len:
     pos = skip(pos, input, modes)
     when defined(debugUsu):
-      debugUsu(pos,input, modes)
+      debugUsu(pos, input, modes)
     case current
     of '#':
       skipComment(pos, input)
-    of '(':
+    of '{', '[':
+      result.add fromChar(current, pos)
       inc pos
       if current notin {'\n', '\r'}:
         modes.incl InlineString
-      result.add(Token(kind: tokLPar))
-      inc level
-    of ')':
+    of '}', ']':
+      result.add fromChar(current, pos)
       inc pos
-      result.add(Token(kind: tokRPar))
-      dec level
       modes.excl InlineString
     of '\n', '\r': inc pos
-    of ':':
+    of '.': #TODO: lexKey proc
       var key = ""
+      let start = pos
       inc pos
-      while current notin {'\r', '\n', ' ', ')'}:
-        key.add(current)
+      if current in quotes:
+        let q = current
         inc pos
+        while current != q:
+          # we need to escape periods to prevent path splitting in parser
+          if current == '.':
+            key.add '\\'
+          key.add(current)
+          inc pos
+        inc pos
+      else:
+        while current notin {'\r', '\n', ' ', '}'}:
+          key.add(current)
+          inc pos
       result.add(
-        Token(kind: tokKey, keyVal: key)
+        Token(pos: start, kind: tokKey, keyVal: key)
       )
       if current == '\n':
         modes.incl RespectNewlines
@@ -148,26 +193,26 @@ proc lex*(input: string): seq[Token] =
     of '"', '\'', '`':
       let quote = current
       var str = ""
+      let start = pos
       inc(pos)
       while current != quote:
         str.add(current)
         inc(pos)
       inc(pos)
-      result.add(Token(kind: tokString, stringVal: subEscapeSeqs(str)))
+      result.add(Token(pos: start, kind: tokString, stringVal: subEscapeSeqs(str)))
     else:
       lexUnquoted(pos, input, result, modes)
 
   if result[0].kind == tokKey:
-    result = @[Token(kind: tokLPar)] & result & @[Token(kind: tokRPar)]
+    result = @[Token(kind: tokLCurly, pos: -1)] & result & @[Token(kind: tokRCurly, pos: pos + 1)]
+
   result.add(Token(kind: tokEnd))
 
 when isMainModule:
   const input = """
-(:key >
-  "A folded list"
-  newlines `don't` matter
-  all items are "one item"
-)
+{."key with space"
+   {.`key with period.` value with a period.}}
 """
+
   echo lex(input)
 

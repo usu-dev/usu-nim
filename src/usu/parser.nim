@@ -1,4 +1,4 @@
-import std/[tables, deques]
+import std/[tables, deques, strutils]
 
 import lexer
 export tables
@@ -16,15 +16,27 @@ type
       value*: string
     of UsuNull:
       nil
+
   UsuParserError* = object of CatchableError
 
-proc peekSecond(deq: Deque[Token]): Token {.inline.} =
-  if deq.len > 1: deq[1]
-  else: Token(kind: tokEnd)
+template error(token: Token, msg = "", suffix = "") =
+  ## Shortcut to raise an exception.
+  var message = msg
+  if message == "":
+    message =
+      case token.kind
+      of tokLBracket: "unexpected opening array bracket"
+      of tokRBracket: "unexpected closing array bracket"
+      of tokLCurly: "unexpected opening map bracket"
+      of tokRCurly: "unexpected closing map bracket"
+      of tokString: "unexpected value: \"" & token.stringVal & "\""
+      of tokKey: "unexpected key: \"" & token.keyVal & "\""
+      of tokEnd: "unexpected EOF"
+  if suffix != "":
+    message.add ", "
+    message.add suffix
 
-proc keyCheck(u: UsuNode, t: Token) =
-  if t.keyVal in u.fields:
-    raise newException(UsuParserError, "keys must be unique, but got duplicate for: " & t.keyVal)
+  raise newException(UsuParserError, message & " at pos: " & $token.pos)
 
 proc pop(d: var Deque[Token]): Token {.inline.} = popFirst d
 
@@ -34,92 +46,130 @@ proc parseString(token: Token): UsuNode =
     else: UsuNode(kind: UsuValue, value: token.stringVal)
   )
 
-proc parse(tokens: var Deque[Token]): UsuNode
+proc parse(tokens: var Deque[Token], root: bool = false): UsuNode
+
+proc toUsuMap(fields: openArray[(string, UsuNode)]): UsuNode =
+   UsuNode(kind: UsuMap, fields: fields.toOrderedTable())
+
+proc toUsuMap(path: seq[string], value: UsuNode): UsuNode =
+  if path.len > 1:
+    result = toUsuMap({path[0]: toUsuMap(path[1..^1], value)})
+  else:
+    result = toUsuMap({path[0]: value})
+
+proc deepMerge[K, V](target: var OrderedTable[K, V], source: OrderedTable[K, V]) =
+  for key, value in source:
+    if target.hasKey(key):
+      # Check if both values are tables to recurse
+      # If they are, merge the nested tables
+      when compiles(deepMerge(target[key], value)):
+        deepMerge(target[key], value)
+      else:
+        target[key] = value # shallow merge (overrides target)
+    else:
+      target[key] = value
+
+proc nestedUpdate(node: var UsuNode, path: seq[string], value: UsuNode) =
+  let curr = path[0]
+  if path.len == 1:
+    if curr in node.fields:
+      assert node.fields[curr].kind == value.kind
+      case node.fields[curr].kind:
+      of UsuMap:
+        node.fields[curr].fields.deepMerge(value.fields)
+      of UsuArray:
+        node.fields[curr].elems.add value.elems
+      of UsuValue, UsuNull:
+        node.fields[curr] = value
+    else:
+      node.fields[curr] = value
+  else:
+    if curr in node.fields:
+      node.fields[curr].nestedUpdate(path[1..^1], value)
+    else:
+      node.fields[curr] = toUsuMap(path[1..^1], value)
+
+
+proc splitPath(token: Token): seq[string] =
+  let key = token.keyVal
+  let paths = key.split('.')
+  var i = 0
+  template next: string =
+    if i+1 < paths.len: paths[i+1] else: ""
+  while i < paths.len:
+    var current = paths[i]
+    if current.endsWith('\\'): # escaped period
+      current = current.replace('\\', '.') & next
+      inc i
+    if current == "":
+      error(token, msg = "key value can't be empty")
+    result.add current
+    inc i
 
 proc parseMap(tokens: var Deque[Token]): UsuNode =
   var currTok: Token
   result = UsuNode(kind: UsuMap)
-
   while true:
     currTok = pop tokens
     case currTok.kind
-    of tokLPar:
-      raise newException(UsuParserError, "Unexpected left paranthesis when parsing map")
-    of tokString:
-      raise newException(UsuParserError, "Unexpected value: " & $currTok.stringVal & ", while parsing map")
+    of tokRCurly: break # end of map
+    of tokLBracket, tokString, tokLCurly, tokRBracket, tokEnd:
+      error(currTok, suffix = "while parsing map")
     of tokKey:
       let nextToken = peekFirst tokens
+      let paths = currTok.splitPath
+      let value =
+        case nextToken.kind
+        of tokString: parseString(pop(tokens))
+        of tokLBracket, tokLCurly: parse(tokens)
+        else:
+          error(nextToken, suffix = "expected value")
 
-      # bail for empty map
-      if currTok.keyVal == "" and nextToken.kind == tokRPar:
-        discard pop tokens
-        break
-      keyCheck result, currTok
-      case nextToken.kind
-      of tokString:
-        result.fields[currTok.keyVal] = parseString(pop tokens)
-      of tokLPar:
-        let value = parse(tokens)
-        result.fields[currTok.keyVal] = value
-      else:
-        raise newException(UsuParserError, "Unexpected token in map: " & $nextToken)
-    of tokRPar: break
-    of tokEnd:
-      raise newException(UsuParserError, "reached EOF: expected closing paren")
-
+      nestedUpdate(result, paths, value)
 
 proc parseArray(tokens: var Deque[Token]): UsuNode =
   var currTok: Token
   result = UsuNode(kind: UsuArray)
   while true:
-    # parse node including opening paranthesis
-    if tokens.peekFirst.kind == tokLPar:
+    # parse node including opening brackets
+    if tokens.peekFirst.kind in {tokLBracket, tokLCurly}:
       result.elems.add parse(tokens)
     else:
       currTok = pop tokens
       case currTok.kind
       of tokString:
         result.elems.add parseString(currTok)
-      of tokRPar: break
-      of tokLPar:
-        raise newException(UsuParserError, "Unexpected opening paranthesis:")
-      of tokKey:
-        raise newException(UsuParserError, "Unexpected key:" & $currTok.keyVal & ", while parsing array")
-      of tokEnd:
-        raise newException(UsuParserError, "reached EOF: expected closing paren")
+      of tokRBracket:
+        break
+      of tokEnd, tokLCurly, tokRCurly, tokLBracket, tokKey:
+        error(currTok, suffix = "while parsing array")
 
-
-proc parse(tokens: var Deque[Token]): UsuNode =
+proc parse(tokens: var Deque[Token], root = false): UsuNode =
   let token = pop tokens
   case token.kind:
-    of tokLPar:
-      case tokens.peekFirst.kind
-      of tokKey:
-        return parseMap(tokens)
-      of tokString, tokLPar:
-        return parseArray(tokens)
-      of tokRPar: # empty array
-        return UsuNode(kind: UsuArray)
-      else: raise newException(UsuParserError, "else error" & $token)
-    of tokRpar:
-      raise newException(UsuParserError, "Unexpected closing paren")
+    of tokLCurly:
+      result = parseMap(tokens)
+    of tokLBracket:
+      result = parseArray(tokens)
+    of tokRCurly, tokRBracket, tokString:
+      error(token, suffix = "expected opening bracket or key")
     of tokKey:
-      raise newException(UsuParserError, "Unexpected key: " & token.keyVal)
+      error(token)
     of tokEnd: discard
-    else:
-      raise newException(UsuParserError, "else error")
+  if root:
+    let last = pop tokens
+    if last.kind != tokEnd:
+      error(last, msg = "expected EOF, got: " & $last.kind)
 
 proc parseUsu*(input: string): UsuNode =
   var tokens = toDeque lex(input)
-  return parse tokens
+  result = parse(tokens, root = true)
 
 when isMainModule:
   const input = """
-:key value with spaces
-:sessions (
-  (:name a protocol with spaces)
-)
+.key value
 """
+
   echo lex(input)
   echo parseUsu(input)
 
