@@ -1,11 +1,3 @@
-##[
-  # Usu stores usu
-
-  A simple configuration language that places type burden on the file consumer.
-
-  .. include:: ./docs/manual.md
-]##
-
 import std/[sets, strutils, tables, options, typetraits]
 import ./parser
 
