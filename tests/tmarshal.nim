@@ -1,4 +1,4 @@
-import std/[unittest, json, tables, options, times, os, strutils, json]
+import std/[unittest, json, tables, options, times, os, strutils]
 
 import usu/[json]
 import usu

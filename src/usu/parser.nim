@@ -185,9 +185,7 @@ proc parseUsu*(input: string): UsuNode =
 
 when isMainModule:
 
-  const input = """
-      {.usu some usu}
-    """
+  const input = "  value  "
   echo lex(input)
   var tokens = toDeque(lex(input))
   echo parse(tokens, root = true)
