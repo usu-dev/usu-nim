@@ -136,6 +136,13 @@ suite "unmarshal":
       .json `{"numbers": [1, 2, 3]}`
     """).to(C)
 
+  test "seqs + arrays":
+    check @[1, 2, 3] == parseUsu("[1 2 3]").to(seq[int])
+    check [1, 2, 3] == parseUsu("[1 2 3]").to(array[3, int])
+
+    expect(UsuParserError):
+      discard parseUsu("[1 2 3]").to(array[2, int])
+
 
 suite "marshal":
   test "quotes":

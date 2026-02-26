@@ -87,6 +87,15 @@ proc fromUsu*[T](v: var seq[T], node: UsuNode) =
     fromUsu(e, n)
     v.add e
 
+proc fromUsu*[T, IDX](a: var array[IDX, T], node: UsuNode) =
+  checkKind node, UsuArray
+  if a.len != node.elems.len:
+    raise newException(UsuParserError, "array has incorrect number of items, expected: $1, got: $2" % [$a.len, $node.elems.len])
+  for i, e in node.elems:
+    var v: T
+    fromUsu(v, e)
+    a[i] = v
+
 proc fromUsu*[T](v: var SomeSet[T], node: UsuNode) =
   checkKind node, UsuArray
   for n in node.elems:
