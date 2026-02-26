@@ -1,4 +1,4 @@
-import std/[unittest, json, tables, options]
+import std/[unittest, json, tables, options, times, os, strutils, json]
 
 import usu/[json]
 import usu
@@ -36,7 +36,36 @@ const fullUsu = """
 .job code monkey
 """
 
-suite "marshal":
+proc `==`(a, b: ref object): bool =
+  ## dereference then compare
+  a[] == b[]
+
+type EnvVar = distinct string
+proc `$`(v: EnvVar): string {.borrow.}
+proc `==`(a, b: EnvVar): bool {.borrow.}
+proc fromUsu(e: var EnvVar, node: UsuNode) =
+  ## custom parsing hook to populate a value
+  ## from environment var with an optional default
+  checkKind node, UsuValue
+  let val = node.value
+  if not val.startsWith("!"):
+    e = EnvVar(val)
+  else:
+    let key = val.split(" ")[0] # [1..^1]
+    let rest =
+      if val.len == key.len: ""
+      else: val[key.len+1..^1]
+    e = EnvVar(getEnv(key[1..^1], rest))
+
+proc fromUsu(d: var DateTime, node: UsuNode) =
+  checkKind node, UsuValue
+  d = parse(node.value, "yyyy.MM.dd")
+
+proc fromUsu(v: var JsonNode, node: UsuNode) =
+  checkKind node, UsuValue
+  v = parseJson(node.value)
+
+suite "unmarshal":
   test "object":
     check john == parseUsu(fullUsu).to(Person)
     check:
@@ -48,9 +77,9 @@ suite "marshal":
     check Company(
       ceo: Person(name: "Linus Torvalds"),
       employees: @[Person(name: "John Doe")]
-    )[] == parseUsu(
+    ) == parseUsu(
       ".ceo {.name Linus Torvalds} .employees [ {.name John Doe} ]"
-    ).to(Company)[]
+    ).to(Company)
 
 
   test "round-trip":
@@ -70,7 +99,45 @@ suite "marshal":
       check @[Red, Blue, Green] == parseUsu("[Yellow]").to(seq[Color])
     check $toUsu(list) == $parseUsu("[Red Blue Green]")
 
-suite "unmarshal":
+  test "usu node":
+    type A = object
+      usu: UsuNode
+    check A(usu: newUsuValue("some usu")) == parseUsu("""
+      {.usu some usu}
+    """).to(A)
+
+    type B = object
+      key: A
+
+    check B(
+      key: A(usu: parseUsu(".map {.key val}"))
+    ) == parseUsu("""
+    .key {.usu {.map {.key val}}}
+    """
+    ).to(B)
+
+  test "custom parsing":
+    type A = object
+      date: DateTime
+    check A(date: parse("1970.01.01", "yyyy.MM.dd")) == parseUsu(".date 1970.01.01").to(A)
+    type B = object
+      e: EnvVar
+
+    putEnv("TEST", "VAL")
+    check B(e: EnvVar("VAL")) == parseUsu(".e !TEST").to(B)
+    check B(e: EnvVar("VAL2")) == parseUsu(".e !TEST2 VAL2").to(B)
+
+    type C = object
+      json: JsonNode
+
+    check C(
+      json: (%* {"numbers": [1, 2, 3]})
+    ) == parseUsu("""
+      .json `{"numbers": [1, 2, 3]}`
+    """).to(C)
+
+
+suite "marshal":
   test "quotes":
     let strings = @[
       "a value that kas a .key",
@@ -78,3 +145,11 @@ suite "unmarshal":
       "escaped quote: \", single quote: ', backtick quote: `",
     ]
     check parseUsu($strings.toUsu()).to(seq[string]) == strings
+
+  test "usu node":
+    type A = object
+      usu: UsuNode
+    const a = A(usu: newUsuValue("some usu"))
+    check parseUsu($a.toUsu()).to(A) == a
+
+

@@ -22,6 +22,8 @@ type
     tokens: seq[Token]
     modes: set[LexerMode]
 
+  UsuParserError* = object of CatchableError
+
 const Quotes = {'"', '\'', '`'}
 const OpenBrackets = {'[', '{'}
 const CloseBrackets = {'}', ']'}
@@ -119,7 +121,7 @@ func addBracket(l: var Lexer) =
     of ']': tokRBracket
     of '{': tokLCurly
     of '}': tokRCurly
-    else: raise newException(ValueError, "failed to lex token, unexpected char: " & $l.curr)
+    else: raise newException(UsuParserError, "failed to lex token, unexpected char: " & $l.curr)
   l.add Token(pos: l.pos, kind: kind)
 
 func lexBracket(l: var Lexer) =
@@ -149,7 +151,7 @@ proc lexKey(l: var Lexer) =
       l.inc
     l.inc
   else:
-    while l.curr notin Newlines + {' ', '}'}:
+    while l.curr notin Newlines + {' ', '}'} and l.curr != '\x00':
       key.add(l.curr)
       l.inc
   l.add newTokKey(start, key)
@@ -160,7 +162,10 @@ proc lexKey(l: var Lexer) =
     l.set ChompNewLines
     inc(l, 2)
 
-proc lexQuotedVal(l: var Lexer) = 
+
+# BUG: properly handle values missing final quote
+proc lexQuotedVal(l: var Lexer) =
+
   let quote = l.curr
   var str = ""
   let start = l.pos
@@ -169,26 +174,12 @@ proc lexQuotedVal(l: var Lexer) =
     str.add(l.curr)
     if (l.next == quote and l.curr != '\\') or (l.next == quote and l.curr & l.prev == "\\\\"):
       inc l, 2; break
+    if l.curr == '\x00':
+      raise newException(UsuParserError, "reached EOF before end quote char: $1, for value starting at pos $2" % [$quote, $start])
     l.inc
   l.add newTokString(start, subEscapeSeqs(str))
 
 proc lexUnquotedVal(l: var Lexer) =
-
-# proc lexUnquoted(
-#   pos: var int,
-#   input: string,
-#   tokens: var seq[Token],
-#   modes: var set[LexerMode]
-# ) =
-  # template current: char =
-  #   if pos < input.len: input[pos]
-  #   else: '\x00'
-  # template prev: char =
-  #   if pos - 1 > 0: input[pos - 1]
-  #   else: '\x00'
-  # template next: char =
-  #   if pos + 1 < input.len: input[pos + 1]
-  #   else: '\x00'
   template keystart: bool =
     l.curr == '.' and l.prev in {' ', '\n', '\r'}
   template eof: bool = l.curr == '\x00'
@@ -242,6 +233,7 @@ proc lex*(l: var Lexer) =
     of Quotes: l.lexQuotedVal
     else: l.lexUnquotedVal
 
+  # BUG: unhandled exception when tokens are empty
   if l.tokens[0].kind == tokKey:
     l.tokens = @[Token(kind: tokLCurly, pos: -1)] & l.tokens & @[Token(kind: tokRCurly, pos: l.pos + 1)]
 

@@ -60,5 +60,4 @@ proc `$`*(usu: UsuNode): string =
     ).join(" ")
     result.add "}"
 
-export UsuNode, parseUsu, UsuParserError
-export marshal
+export marshal, parser

@@ -1,7 +1,7 @@
 import std/[tables, deques, strutils, strformat]
 
 import lexer
-export tables
+export tables, UsuParserError
 
 type
   UsuNodeKind* = enum
@@ -17,7 +17,21 @@ type
     of UsuNull:
       nil
 
-  UsuParserError* = object of CatchableError
+func `==`*(a, b: UsuNode): bool =
+  ## check two nodes for equality
+  if a.kind != b.kind: return false
+  case a.kind:
+  of UsuNull: result = true
+  of UsuValue:
+    result = a.value == b.value
+  of UsuArray:
+    result = a.elems == b.elems
+  of UsuMap:
+    result = a.fields == b.fields
+
+
+proc newUsuValue*(s: string): UsuNode =
+  UsuNode(kind: UsuValue, value: s)
 
 template error(token: Token, msg = "", suffix = "") =
   ## Shortcut to raise an exception.
@@ -170,9 +184,8 @@ proc parseUsu*(input: string): UsuNode =
   result = parse(tokens, root = true)
 
 when isMainModule:
-  const input = """
-.key value
-"""
+
+  const input = """.json `{"numbers": [1, 2, 3]}"""
   echo lex(input)
   var tokens = toDeque(lex(input))
   echo parse(tokens, root = true)
