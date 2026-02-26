@@ -3,8 +3,8 @@ import std/[os, strformat]
 task tests, "run tests":
   selfExec "c -r tests/tester.nim"
 
-proc getTag(): string =
-  let (output, code) = gorgeEx("git describe --tags --match 'v*'")
+proc getCommit(): string =
+  let (output, code) = gorgeEx("git rev-parse HEAD")
   if code != 0:
     quit output
   return output
@@ -16,7 +16,7 @@ task docs, "Deploy doc html + search index to public/ directory":
     name = "usu"
     tag =
       when defined(version): version
-      else: getTag()
+      else: getCommit()
     srcFile = "src" / (name & ".nim")
     gitUrl = fmt"https://github.com/usu-dev/{name}-nim"
   selfExec fmt"""doc --project --index:on --git.url:{gitUrl} --git.commit:"{tag}" --outdir:public {srcFile}"""
