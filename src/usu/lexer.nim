@@ -62,19 +62,20 @@ proc new(T: typedesc[Lexer], input: string): Lexer =
   new(result)
   result.input = input
 
+{.push inline.}
 proc lastWasKey(l: Lexer): bool =
   if l.tokens.len > 0:
     result = l.tokens[^1].kind == tokKey
 
-proc curr(l: Lexer): char {.inline.} =
+proc curr(l: Lexer): char =
   if l.pos < l.input.len: l.input[l.pos]
   else: '\x00'
 
-proc next(l: Lexer): char {.inline.} =
+proc next(l: Lexer): char =
   if l.pos+1 < l.input.len: l.input[l.pos+1]
   else: '\x00'
 
-proc prev(l: Lexer): char {.inline.} =
+proc prev(l: Lexer): char =
   if l.pos - 1 >= 0: l.input[l.pos-1]
   else: '\x00'
 
@@ -96,6 +97,22 @@ proc drop(l: var Lexer, modes: varargs[LexerMode]) =
 
 proc isSet(l: var Lexer, mode: LexerMode): bool =
   mode in l.modes
+
+proc atEof(l: Lexer): bool =
+  # quirk of l.curr that null byte is returned
+  l.curr == '\x00'
+
+proc atKeyStart(l: Lexer): bool =
+  l.curr == '.' and l.prev in {' '} + NewLines
+
+proc atBracket(l: Lexer): bool =
+  l.curr in Brackets
+
+# is this portable when used?
+proc atEol(l: Lexer): bool =
+  l.curr == '\n'
+
+{.pop.}
 
 proc skip(
   l: var Lexer,
@@ -155,7 +172,7 @@ proc lexKey(l: var Lexer) =
       l.inc
     l.inc
   else:
-    while l.curr notin Newlines + {' ', '}'} and l.curr != '\x00':
+    while l.curr notin Newlines + {' ', '}'} and not l.atEof: 
       key.add(l.curr)
       l.inc
   l.add newTokKey(start, key)
@@ -166,10 +183,7 @@ proc lexKey(l: var Lexer) =
     l.set ChompNewLines
     inc(l, 2)
 
-
-# BUG: properly handle values missing final quote
 proc lexQuotedVal(l: var Lexer) =
-
   let quote = l.curr
   var str = ""
   let start = l.pos
@@ -178,23 +192,11 @@ proc lexQuotedVal(l: var Lexer) =
     str.add(l.curr)
     if (l.next == quote and l.curr != '\\') or (l.next == quote and l.curr & l.prev == "\\\\"):
       inc l, 2; break
-    if l.curr == '\x00':
+    if l.atEof:
       raise newException(UsuParserError, "reached EOF before end quote char: $1, for value starting at pos $2" % [$quote, $start])
     l.inc
   l.add newTokString(start, subEscapeSeqs(str))
 
-{.push inline.}
-proc atEof(l: Lexer): bool =
-  # quirk of l.curr that null byte is returned
-  l.curr == '\x00'
-proc atKeyStart(l: Lexer): bool =
-  l.curr == '.' and l.prev in {' '} + NewLines
-proc atBracket(l: Lexer): bool =
-  l.curr in Brackets
-# is this portable when used?
-proc atEol(l: Lexer): bool =
-  l.curr == '\n'
-{.pop.}
 
 # TODO: reduce allocations and string processing/stripping
 proc lexUnquotedVal(l: var Lexer) =
