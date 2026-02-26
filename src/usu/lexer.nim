@@ -62,6 +62,10 @@ proc new(T: typedesc[Lexer], input: string): Lexer =
   new(result)
   result.input = input
 
+proc lastWasKey(l: Lexer): bool =
+  if l.tokens.len > 0:
+    result = l.tokens[^1].kind == tokKey
+
 proc curr(l: Lexer): char {.inline.} =
   if l.pos < l.input.len: l.input[l.pos]
   else: '\x00'
@@ -179,43 +183,59 @@ proc lexQuotedVal(l: var Lexer) =
     l.inc
   l.add newTokString(start, subEscapeSeqs(str))
 
+{.push inline.}
+proc atEof(l: Lexer): bool =
+  # quirk of l.curr that null byte is returned
+  l.curr == '\x00'
+proc atKeyStart(l: Lexer): bool =
+  l.curr == '.' and l.prev in {' '} + NewLines
+proc atBracket(l: Lexer): bool =
+  l.curr in Brackets
+# is this portable when used?
+proc atEol(l: Lexer): bool =
+  l.curr == '\n'
+{.pop.}
+
+# TODO: reduce allocations and string processing/stripping
 proc lexUnquotedVal(l: var Lexer) =
-  template keystart: bool =
-    l.curr == '.' and l.prev in {' ', '\n', '\r'}
-  template eof: bool = l.curr == '\x00'
-
   var str = ""
+  var hadNewLine = false
 
-  let strEnd = {'}',']', '[', '{'} + (
-    if l.isSet(InlineString) and l.tokens[^1].kind != tokKey: {' ', '\n'}
-    elif l.tokens.len > 0 and l.tokens[^1].kind == tokKey: {'\x00'}
-    else: {'\n'}
-  )
+  template stop: bool =
+    l.atKeystart or l.atEof or l.atBracket
+
   let start = l.pos
   while true:
     if l.curr == '#':
       # remove any trailing whitespace before comment
       str = strip(str, leading = false)
       l.skipComment
-      if l.curr == '.': break
+      if stop: break
     else:
       str.add(l.curr)
     l.inc
-    if keystart or (l.curr in strEnd) or eof: break
- 
-  str =
-    if l.isSet(InlineString): strip(str)
-    else: dedent(str)
-  let newlineEnd = str.len > 0 and str[^1] in NewLines
+    if stop: break
+    if not l.lastWasKey:
+      if l.isSet(InlineString):
+        if l.curr in whitespaces: break
+      elif l.atEol: hadNewLine = true; break
+
+  if l.isSet(InlineString):
+    str = strip(str)
+  else:
+    str = dedent(str)
+    hadNewLine = str.endsWith('\n')
+
   str = strip(str, chars = whitespaces + NewLines)
+  if str == "": return
   str = subEscapeSeqs(str)
-  if l.isSet(ChompNewLines): str = str.splitLines().join(" ")
+  if l.isSet(ChompNewLines):
+    str = str.splitLines().join(" ")
+  elif l.isSet(RespectNewlines) and hadNewLine:
+    str.add "\n"
+  l.add newTokString(start, str)
 
-  if str != "":
-    if l.isSet(RespectNewlines) and newLineEnd:
-      str.add "\n"
-    l.add newTokString(start, str)
-
+  # reset modes that effect unquoted parsing
   l.drop RespectNewlines, ChompNewlines
 
 
