@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/checkout@v6
         with:
-          repo: usu-dev/tests
+          repository: usu-dev/tests
           path: tests/official
 
       - uses: jiro4989/setup-nim-action@v2
