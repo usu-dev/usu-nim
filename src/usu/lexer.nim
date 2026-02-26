@@ -110,7 +110,7 @@ proc atBracket(l: Lexer): bool =
 
 # is this portable when used?
 proc atEol(l: Lexer): bool =
-  l.curr == '\n'
+  l.curr == '\n' or ((l.curr & l.next) == "\r\n")
 
 {.pop.}
 
@@ -177,7 +177,7 @@ proc lexKey(l: var Lexer) =
       l.inc
   l.add newTokKey(start, key)
 
-  if l.curr == '\n':
+  if l.atEol:
     l.set RespectNewlines
   elif l.curr & l.next == " >":
     l.set ChompNewLines
@@ -202,11 +202,11 @@ proc lexQuotedVal(l: var Lexer) =
 proc lexUnquotedVal(l: var Lexer) =
   var str = ""
   var hadNewLine = false
+  var start = l.pos
 
   template stop: bool =
     l.atKeystart or l.atEof or l.atBracket
 
-  let start = l.pos
   while true:
     if l.curr == '#':
       # remove any trailing whitespace before comment
@@ -221,6 +221,10 @@ proc lexUnquotedVal(l: var Lexer) =
       if l.isSet(InlineString):
         if l.curr in whitespaces: break
       elif l.atEol: hadNewLine = true; break
+
+  for c in str:
+    if c in whitespaces: inc start
+    else: break
 
   if l.isSet(InlineString):
     str = strip(str)

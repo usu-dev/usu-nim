@@ -27,7 +27,11 @@ template checkError(path: string) =
   except UsuParserError as e:
     var message = readFile(path / "out.msg")
     message.stripLineEnd()
-    check e.msg == message
+    # \r\n handling makes the pos unstable so ignore it on windows
+    when defined(windows):
+      check e.msg.split("pos")[0] == message.split("pos")[0]
+    else:
+      check e.msg == message
 
 suite "official failing":
   for path in failing:
