@@ -29,36 +29,45 @@ func `==`*(a, b: UsuNode): bool =
   of UsuMap:
     result = a.fields == b.fields
 
-
 proc newUsuValue*(s: string): UsuNode =
   UsuNode(kind: UsuValue, value: s)
 
+proc newUsuNull*(): UsuNode =
+  UsuNode(kind: UsuNull)
 template error(token: Token, msg = "", suffix = "") =
   ## Shortcut to raise an exception.
   var message = msg
   if message == "":
-    message =
+    message = "unexpected " & (
       case token.kind
-      of tokLBracket: "unexpected opening array bracket"
-      of tokRBracket: "unexpected closing array bracket"
-      of tokLCurly: "unexpected opening map bracket"
-      of tokRCurly: "unexpected closing map bracket"
-      of tokString: "unexpected value: \"" & token.stringVal & "\""
-      of tokKey: "unexpected key: \"" & token.keyVal & "\""
-      of tokEnd: "unexpected EOF"
+      of tokLBracket: "opening array bracket"
+      of tokRBracket: "closing array bracket"
+      of tokLCurly: "opening map bracket"
+      of tokRCurly: "closing map bracket"
+      of tokString: "value: \"" & token.stringVal & "\""
+      of tokKey: "key: \"" & token.keyVal & "\""
+      of tokEnd: "EOF"
+      of tokNull: "null"
+    )
   if suffix != "":
     message.add ", "
     message.add suffix
 
   raise newException(UsuParserError, message & " at pos: " & $token.pos)
 
-proc pop(d: var Deque[Token]): Token {.inline.} = popFirst d
+proc newUsuValue(t: Token): UsuNode = 
+  case t.kind
+  of tokString:
+    result = newUsuValue(t.stringVal)
+  else: error(t, "expected tokString")
 
-proc parseString(token: Token): UsuNode =
-  result = (
-    if token.stringVal == "null": UsuNode(kind: UsuNull)
-    else: UsuNode(kind: UsuValue, value: token.stringVal)
-  )
+proc newUsuNull*(t: Token): UsuNode =
+  case t.kind
+  of tokNull:
+    result = UsuNode(kind: UsuNull)
+  else: error(t, "expected tokNull")
+
+proc pop(d: var Deque[Token]): Token {.inline.} = popFirst d
 
 proc parse(tokens: var Deque[Token], root: bool = false): UsuNode
 
@@ -131,15 +140,18 @@ proc parseMap(tokens: var Deque[Token]): UsuNode =
     currTok = pop tokens
     case currTok.kind
     of tokRCurly: break # end of map
-    of tokLBracket, tokString, tokLCurly, tokRBracket, tokEnd:
+    of tokLBracket, tokString, tokLCurly, tokRBracket, tokNull, tokEnd:
       error(currTok, suffix = "while parsing map")
     of tokKey:
       let nextToken = peekFirst tokens
       let paths = currTok.splitPath
       let value =
         case nextToken.kind
-        of tokString: parseString(pop(tokens))
+        of tokString: newUsuValue(pop(tokens))
         of tokLBracket, tokLCurly: parse(tokens)
+        of tokNull:
+          discard pop(tokens)
+          newUsuNull()
         else:
           error(nextToken, suffix = "expected value")
 
@@ -156,7 +168,9 @@ proc parseArray(tokens: var Deque[Token]): UsuNode =
       currTok = pop tokens
       case currTok.kind
       of tokString:
-        result.elems.add parseString(currTok)
+        result.elems.add newUsuValue(currTok)
+      of tokNull:
+        result.elems.add newUsuNull()
       of tokRBracket:
         break
       of tokEnd, tokLCurly, tokRCurly, tokLBracket, tokKey:
@@ -169,7 +183,7 @@ proc parse(tokens: var Deque[Token], root = false): UsuNode =
       result = parseMap(tokens)
     of tokLBracket:
       result = parseArray(tokens)
-    of tokRCurly, tokRBracket, tokString:
+    of tokRCurly, tokRBracket, tokString, tokNull:
       error(token, suffix = "expected opening bracket or key")
     of tokKey:
       error(token)

@@ -6,7 +6,7 @@ type
   TokenKind* = enum
     tokLCurly, tokRCurly,
     tokLBracket, tokRBracket
-    tokKey, tokString,
+    tokKey, tokString, tokNull
     tokEnd
   Token* = object
     pos*: int ## start position of the token
@@ -35,6 +35,9 @@ proc newTokKey(pos: int, val: string): Token =
 
 proc newTokString(pos: int, val: string): Token =
   Token(kind: tokString, pos: pos, stringVal: val)
+
+proc newTokNull(pos: int): Token =
+  Token(kind: tokNull, pos: pos)
 
 # TODO: support more escape sequences?
 proc subEscapeSeqs(s: string): string =
@@ -243,7 +246,11 @@ proc lexUnquotedVal(l: var Lexer) =
     str = str.splitLines().join(" ")
   elif l.isSet(RespectNewlines) and hadNewLine:
     str.add "\n"
-  l.add newTokString(start, str)
+
+  if str == "null":
+    l.add newTokNull(start)
+  else:
+    l.add newTokString(start, str)
 
   # reset modes that effect unquoted parsing
   l.drop RespectNewlines, ChompNewlines
