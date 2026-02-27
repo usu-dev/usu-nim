@@ -8,7 +8,7 @@ type
     Admin, User
   Person = object
     name: string
-    age: int
+    age: int = 35 ## a default value
     weight: float
     emails: Table[string, string]
     roles: set[Role]
@@ -40,27 +40,6 @@ proc `==`(a, b: ref object): bool =
   ## dereference then compare
   a[] == b[]
 
-type EnvVar = distinct string
-proc `$`(v: EnvVar): string {.borrow.}
-proc `==`(a, b: EnvVar): bool {.borrow.}
-proc fromUsu(e: var EnvVar, node: UsuNode) =
-  ## custom parsing hook to populate a value
-  ## from environment var with an optional default
-  checkKind node, UsuValue
-  let val = node.value
-  if not val.startsWith("!"):
-    e = EnvVar(val)
-  else:
-    let key = val.split(" ")[0] # [1..^1]
-    let rest =
-      if val.len == key.len: ""
-      else: val[key.len+1..^1]
-    e = EnvVar(getEnv(key[1..^1], rest))
-
-proc fromUsu(d: var DateTime, node: UsuNode) =
-  checkKind node, UsuValue
-  d = parse(node.value, "yyyy.MM.dd")
-
 proc fromUsu(v: var JsonNode, node: UsuNode) =
   checkKind node, UsuValue
   v = parseJson(node.value)
@@ -80,6 +59,9 @@ suite "unmarshal":
     ) == parseUsu(
       ".ceo {.name Linus Torvalds} .employees [ {.name John Doe} ]"
     ).to(Company)
+
+  test "default value":
+    check parseUsu(".name John Doe").to(Person).age == 35
 
   test "round-trip":
     check john == parseUsu($john.toUsu()).to(Person)
@@ -128,26 +110,6 @@ suite "unmarshal":
     """
     ).to(B)
 
-  test "custom parsing":
-    type A = object
-      date: DateTime
-    check A(date: parse("1970.01.01", "yyyy.MM.dd")) == parseUsu(".date 1970.01.01").to(A)
-    type B = object
-      e: EnvVar
-
-    putEnv("TEST", "VAL")
-    check B(e: EnvVar("VAL")) == parseUsu(".e !TEST").to(B)
-    check B(e: EnvVar("VAL2")) == parseUsu(".e !TEST2 VAL2").to(B)
-
-    type C = object
-      json: JsonNode
-
-    check C(
-      json: (%* {"numbers": [1, 2, 3]})
-    ) == parseUsu("""
-      .json `{"numbers": [1, 2, 3]}`
-    """).to(C)
-
   test "seqs + arrays":
     check @[1, 2, 3] == parseUsu("[1 2 3]").to(seq[int])
     check [1, 2, 3] == parseUsu("[1 2 3]").to(array[3, int])
@@ -180,4 +142,57 @@ suite "marshal":
     const a = A(usu: newUsuValue("some usu"))
     check parseUsu($a.toUsu()).to(A) == a
 
+# ---
+type EnvVar = distinct string
+proc `$`(v: EnvVar): string {.borrow.}
+proc `==`(a, b: EnvVar): bool {.borrow.}
+proc fromUsu(e: var EnvVar, node: UsuNode) =
+  ## custom parsing hook to populate a value
+  ## from environment var with an optional default
+  checkKind node, UsuValue
+  let val = node.value
+  if not val.startsWith("!"):
+    e = EnvVar(val)
+  else:
+    let key = val.split(" ")[0] # [1..^1]
+    let rest =
+      if val.len == key.len: ""
+      else: val[key.len+1..^1]
+    e = EnvVar(getEnv(key[1..^1], rest))
 
+proc fromUsu(d: var DateTime, node: UsuNode) =
+  checkKind node, UsuValue
+  d = parse(node.value, "yyyy.MM.dd")
+
+type
+  ObjWithHook = object
+    value: string
+    post: string
+
+proc postFromUsu(v: var ObjWithHook) =
+  v.post = v.value & "bar"
+
+
+suite "customize":
+  test "custom unmarshaling":
+    type A = object
+      date: DateTime
+    check A(date: parse("1970.01.01", "yyyy.MM.dd")) == parseUsu(".date 1970.01.01").to(A)
+    type B = object
+      e: EnvVar
+
+    putEnv("TEST", "VAL")
+    check B(e: EnvVar("VAL")) == parseUsu(".e !TEST").to(B)
+    check B(e: EnvVar("VAL2")) == parseUsu(".e !TEST2 VAL2").to(B)
+
+    type C = object
+      json: JsonNode
+
+    check C(
+      json: (%* {"numbers": [1, 2, 3]})
+    ) == parseUsu("""
+      .json `{"numbers": [1, 2, 3]}`
+    """).to(C)
+
+  test "post hook":
+    check ObjWithHook(value: "foo", post: "foobar") == parseUsu(".value foo").to(ObjWithHook)

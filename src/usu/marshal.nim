@@ -166,11 +166,15 @@ proc fromUsu*[T: object | ref object](v: var T, node: UsuNode) =
   checkKind node, UsuMap
   when compiles(new(v)):
     new(v)
+  else:
+    v = T()
   for name, value in v.fieldPairs:
     if name in node.fields:
       when compiles(new(value)):
         new(value)
       fromUsu(value, node.fields[name])
+  when compiles(postFromUsu(v)):
+    postFromUsu(v)
 
 proc to*[T](node: UsuNode, t: typedesc[T]): T =
   fromUsu(result, node)
