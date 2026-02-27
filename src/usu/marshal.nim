@@ -38,8 +38,10 @@ func toUsu*[T](s: SomeSet[T]): UsuNode =
     result.elems.add toUsu(item)
 
 func toUsu*[T](o: Option[T]): UsuNode =
-  result = UsuNode(kind: UsuValue)
-  result.value = if o.isSome(): $o.get() else: "null"
+  if o.isSome():
+    result = toUsu($o.get())
+  else:
+    result = newUsuNull()
 
 func toUsu*(t: tuple): UsuNode =
   let named = type(t).isNamedTuple
@@ -115,7 +117,6 @@ proc fromUsu*[T](v: var SomeTable[string, T], node: UsuNode) =
     v[name] = value
 
 proc fromUsu*[T](o: var Option[T], node: UsuNode) =
-  checkKind node, {UsuValue, UsuNull}
   if node.kind == UsuNull:
     o = none(T)
   else:

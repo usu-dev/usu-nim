@@ -81,7 +81,6 @@ suite "unmarshal":
       ".ceo {.name Linus Torvalds} .employees [ {.name John Doe} ]"
     ).to(Company)
 
-
   test "round-trip":
     check john == parseUsu($john.toUsu()).to(Person)
 
@@ -98,7 +97,19 @@ suite "unmarshal":
     expect(ValueError):
       check @[Red, Blue, Green] == parseUsu("[Yellow]").to(seq[Color])
     check $toUsu(list) == $parseUsu("[Red Blue Green]")
-
+  test "optionals":
+    type B = object
+      str: string
+    type A = object
+      opt: Option[B]
+    
+    check A(opt: some(B(str: "string"))) == parseUsu("""
+      .opt {.str string}
+    """).to(A)
+    check A(opt: none(B)) == parseUsu("""
+      .opt null
+    """).to(A)
+  
   test "usu node":
     type A = object
       usu: UsuNode
