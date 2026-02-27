@@ -97,12 +97,13 @@ suite "unmarshal":
     expect(ValueError):
       check @[Red, Blue, Green] == parseUsu("[Yellow]").to(seq[Color])
     check $toUsu(list) == $parseUsu("[Red Blue Green]")
+
   test "optionals":
     type B = object
       str: string
     type A = object
       opt: Option[B]
-    
+
     check A(opt: some(B(str: "string"))) == parseUsu("""
       .opt {.str string}
     """).to(A)
@@ -163,6 +164,15 @@ suite "marshal":
       "escaped quote: \", single quote: ', backtick quote: `",
     ]
     check parseUsu($strings.toUsu()).to(seq[string]) == strings
+  test "optionals":
+    type B = object
+      str: string
+    type A = object
+      opt: Option[B]
+
+    const a = A(opt: some(B(str: "string")))
+    check parseUsu($a.toUsu()).to(A) == a
+
 
   test "usu node":
     type A = object

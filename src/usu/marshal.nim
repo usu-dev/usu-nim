@@ -39,7 +39,7 @@ func toUsu*[T](s: SomeSet[T]): UsuNode =
 
 func toUsu*[T](o: Option[T]): UsuNode =
   if o.isSome():
-    result = toUsu($o.get())
+    result = toUsu(o.get())
   else:
     result = newUsuNull()
 
