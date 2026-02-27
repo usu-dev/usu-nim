@@ -1,4 +1,4 @@
-import std/[sets, strutils, tables, options, typetraits]
+import std/[sets, strutils, strtabs, tables, options, typetraits]
 import ./parser
 
 type
@@ -7,7 +7,6 @@ type
      OrderedTable[K, V] |
      TableRef[K, V] |
      OrderedTableRef[K, V]
-
   SomeSet*[T] = HashSet[T] | OrderedSet[T] | set[T]
 
 func toUsu*[T: bool | int | float | string](val: T): UsuNode =
@@ -28,6 +27,11 @@ func toUsu*[K,V](t: SomeTable[K,V]): UsuNode =
   result = UsuNode(kind: UsuMap)
   for k, v in t.pairs:
     result.fields[$k] = toUsu(v)
+
+func toUsu*(t: StringTableRef): UsuNode =
+  result = UsuNode(kind: UsuMap)
+  for k, v in t.pairs:
+    result.fields[k] = toUsu(v)
 
 func toUsu*[E: enum](e: E): UsuNode =
   result = UsuNode(kind: UsuValue, value: $e)
@@ -113,6 +117,14 @@ proc fromUsu*[T](v: var SomeTable[string, T], node: UsuNode) =
   checkKind node, UsuMap
   for name, nodeValue in node.fields:
     var value: T
+    fromUsu(value, nodeValue)
+    v[name] = value
+
+proc fromUsu*(v: var StringTableRef, node: UsuNode) =
+  checkKind node, UsuMap
+  v = newStringTable(modeCaseSensitive)
+  for name, nodeValue in node.fields:
+    var value: string
     fromUsu(value, nodeValue)
     v[name] = value
 
