@@ -63,7 +63,9 @@ when defined(debugUsu):
 
 proc new(T: typedesc[Lexer], input: string): Lexer =
   new(result)
-  result.input = input
+  # we normalzie line endings for consistent behavior across platforms
+  # this negates some of the partially implemented support when encountering \r\n in the lexer
+  result.input = input.replace("\r\n", "\n")
 
 {.push inline.}
 proc lastWasKey(l: Lexer): bool =
