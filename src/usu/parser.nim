@@ -117,22 +117,40 @@ proc nestedUpdate(node: var UsuNode, path: seq[string], value: UsuNode, token: T
     else:
       node.fields[curr] = toUsuMap(path[1..^1], value)
 
-
-proc splitPath(token: Token): seq[string] =
+func splitEscapedPath(token: Token): seq[string] =
   let key = token.keyVal
-  let paths = key.split('.')
   var i = 0
-  template next: string =
-    if i+1 < paths.len: paths[i+1] else: ""
-  while i < paths.len:
-    var current = paths[i]
-    if current.endsWith('\\'): # escaped period
-      current = current.replace('\\', '.') & next
-      inc i
-    if current == "":
+  while i < len(key):
+    var path = ""
+    var start = i
+    while i < len(key):
+      case key[i]
+      of '\\':
+        path.add key[start..i-1] & "."
+        inc i, 2
+        start = i
+      of '.':
+        path.add key[start..i-1]
+        inc i; break
+      else: inc i
+    if i == len(key):
+      path.add key[start..i-1]
+
+    if path == "":
       error(token, msg = "key value can't be empty")
-    result.add current
-    inc i
+    else:
+      result.add path
+
+func splitPath(token: Token): seq[string] =
+  if token.kind != tokKey:
+    error(token, "expected tokKey")
+  let key = token.keyVal
+  if "." notin key:
+    return @[key]
+  elif "\\." notin key:
+    return key.split('.')
+  else:
+    return splitEscapedPath(token)
 
 proc parseMap(tokens: var Deque[Token]): UsuNode =
   var currTok: Token
@@ -199,8 +217,7 @@ proc parseUsu*(input: string): UsuNode =
   result = parse(tokens, root = true)
 
 when isMainModule:
-
-  const input = "  value  "
+  const input = ".`level1.level2.level3` value"
   echo lex(input)
   var tokens = toDeque(lex(input))
   echo parse(tokens, root = true)
