@@ -34,6 +34,10 @@ proc newUsuValue*(s: string): UsuNode =
 
 proc newUsuNull*(): UsuNode =
   UsuNode(kind: UsuNull)
+
+proc newUsuMap*(fields: openArray[(string, UsuNode)]): UsuNode =
+   UsuNode(kind: UsuMap, fields: fields.toOrderedTable())
+
 template error(token: Token, msg = "", suffix = "") =
   ## Shortcut to raise an exception.
   var message = msg
@@ -71,14 +75,11 @@ proc pop(d: var Deque[Token]): Token {.inline.} = popFirst d
 
 proc parse(tokens: var Deque[Token], root: bool = false): UsuNode
 
-proc toUsuMap(fields: openArray[(string, UsuNode)]): UsuNode =
-   UsuNode(kind: UsuMap, fields: fields.toOrderedTable())
-
 proc toUsuMap(path: seq[string], value: UsuNode): UsuNode =
   if path.len > 1:
-    result = toUsuMap({path[0]: toUsuMap(path[1..^1], value)})
+    result = newUsuMap({path[0]: toUsuMap(path[1..^1], value)})
   else:
-    result = toUsuMap({path[0]: value})
+    result = newUsuMap({path[0]: value})
 
 proc deepMerge[K, V](target: var OrderedTable[K, V], source: OrderedTable[K, V]) =
   for key, value in source:
