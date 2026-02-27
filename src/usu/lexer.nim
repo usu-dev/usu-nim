@@ -195,7 +195,11 @@ proc lexQuotedVal(l: var Lexer) =
     if l.atEof:
       raise newException(UsuParserError, "reached EOF before end quote char: $1, for value starting at pos $2" % [$quote, $start])
     l.inc
-  l.add newTokString(start, subEscapeSeqs(str))
+
+  if str.startswith("\n") or str.startsWith("\r\n"):
+    str = dedent(str).strip(trailing=false)
+  str = subEscapeSeqs(str)
+  l.add newTokString(start, str)
 
 
 # TODO: reduce allocations and string processing/stripping
