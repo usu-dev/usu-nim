@@ -34,6 +34,24 @@ proc escapeValue(s: string, prefix = "\"", suffix = "\""): string =
     else: add(result, c)
   add(result, suffix)
 
+
+proc usuValueToStr(usu: UsuNode): string =
+  assert usu.kind == UsuValue
+  const quotes = toHashSet(['"', '\'', '`'])
+  let
+    chars = usu.value.toSeq().toHashSet()
+    quoteOptions = quotes - chars
+  if quoteOptions.len == 3 and not usu.value.hasKeyLikeWord:
+    return usu.value
+  elif '"' in quoteOptions:
+    return "\"" & usu.value & "\""
+  elif '\'' in quoteOptions:
+    return "'" & usu.value & "'"
+  elif '`' in quoteOptions:
+    return "`" & usu.value & "`"
+  else:
+    return escapeValue(usu.value)
+
 proc `$`*(usu: UsuNode): string =
   case usu.kind
   of UsuNull:
@@ -45,20 +63,7 @@ proc `$`*(usu: UsuNode): string =
     ).join(" ")
     result.add "]"
   of UsuValue:
-    const quotes = toHashSet(['"', '\'', '`'])
-    let
-      chars = usu.value.toSeq().toHashSet()
-      quoteOptions = quotes - chars
-    if quoteOptions.len == 3 and not usu.value.hasKeyLikeWord:
-      result.add usu.value
-    elif '"' in quoteOptions:
-      result.add "\"" & usu.value & "\""
-    elif '\'' in quoteOptions:
-      result.add "'" & usu.value & "'"
-    elif '`' in quoteOptions:
-      result.add "`" & usu.value & "`"
-    else:
-      result.add escapeValue(usu.value)
+    result = usuValueToStr(usu)
   of UsuMap:
     result.add "{"
     result.add collect(
