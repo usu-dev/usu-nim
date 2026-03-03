@@ -39,18 +39,20 @@ proc usuValueToStr(usu: UsuNode): string =
   assert usu.kind == UsuValue
   const quotes = toHashSet(['"', '\'', '`'])
   let
-    chars = usu.value.toSeq().toHashSet()
+    s = usu.value
+    chars = s.toSeq().toHashSet()
     quoteOptions = quotes - chars
-  if quoteOptions.len == 3 and not usu.value.hasKeyLikeWord:
-    return usu.value
+
+  if quoteOptions.len == 3 and not s.hasKeyLikeWord:
+    return s
   elif '"' in quoteOptions:
-    return "\"" & usu.value & "\""
+    return "\"" & s & "\""
   elif '\'' in quoteOptions:
-    return "'" & usu.value & "'"
+    return "'" & s & "'"
   elif '`' in quoteOptions:
-    return "`" & usu.value & "`"
+    return "`" & s & "`"
   else:
-    return escapeValue(usu.value)
+    return escapeValue(s)
 
 proc `$`*(usu: UsuNode): string =
   case usu.kind
