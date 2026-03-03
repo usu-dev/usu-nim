@@ -126,8 +126,9 @@ proc skip(
   let startPos = l.pos
   while l.curr in chars:
     l.inc
+
   # why do I iterate then check the modes?
-  if (l.curr notin Syntax + Quotes) and not l.isSet(InlineString):
+  if (l.curr notin Syntax + Quotes + {'r'}) and not l.isSet(InlineString):
     l.pos = startPos
 
 proc skipComment(l: var Lexer) =
@@ -188,7 +189,7 @@ proc lexKey(l: var Lexer) =
     l.set ChompNewLines
     inc(l, 2)
 
-proc lexQuotedVal(l: var Lexer) =
+proc lexQuotedVal(l: var Lexer, raw = false) =
   let quote = l.curr
   var str = ""
   let start = l.pos
@@ -203,7 +204,8 @@ proc lexQuotedVal(l: var Lexer) =
 
   if str.startswith("\n") or str.startsWith("\r\n"):
     str = dedent(str).strip(trailing=false)
-  str = subEscapeSeqs(str)
+  if not raw:
+    str = subEscapeSeqs(str)
   l.add newTokString(start, str)
 
 
@@ -270,7 +272,11 @@ proc lex*(l: var Lexer) =
     of '.': l.lexKey
     of '>': l.inc # skipping this newline will in effect activate InlineString
     of Quotes: l.lexQuotedVal
-    else: l.lexUnquotedVal
+    else:
+      if l.curr == 'r' and l.next in Quotes:
+        l.inc; l.lexQuotedVal(raw=true)
+      else:
+        l.lexUnquotedVal
 
   # BUG: unhandled exception when tokens are empty
   if l.tokens[0].kind == tokKey:
