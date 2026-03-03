@@ -9,13 +9,6 @@
 import std/[sequtils, sets, strutils, tables, sugar]
 import ./usu/[parser, marshal]
 
-proc hasKeyLikeWord(s: string): bool =
-  var prev = '\x00'
-  for c in s:
-    if c == '.' and prev == ' ':
-      return true
-    prev = c
-
 proc escapeKey(s: string): string =
   if "." notin s and " " notin s:
     return s
@@ -31,10 +24,20 @@ proc escapeValue(s: string, prefix = "\"", suffix = "\""): string =
   for c in items(s):
     case c
     of '\"': add(result, "\\\"")
+    of '\n': add(result, "\\n")
     else: add(result, c)
   add(result, suffix)
 
+#[
+ proc hasKeyLikeWord(s: string): bool =
+   var prev = '\x00'
+   for c in s:
+     if c == '.' and prev == ' ':
+       return true
+     prev = c
 
+
+# BUG: this proc is insufficient if string has newlines
 proc usuValueToStr(usu: UsuNode): string =
   assert usu.kind == UsuValue
   const quotes = toHashSet(['"', '\'', '`'])
@@ -53,6 +56,16 @@ proc usuValueToStr(usu: UsuNode): string =
     return "`" & s & "`"
   else:
     return escapeValue(s)
+]#
+
+proc valueToStr(usu: UsuNode): string =
+  assert usu.kind == UsuValue
+  let chars = usu.value.toSeq().toHashSet()
+  if len([' ', '\n'].toHashSet() * chars) > 0 :
+    return escapeValue(usu.value)
+  else:
+    return usu.value
+
 
 proc `$`*(usu: UsuNode): string =
   case usu.kind
@@ -65,7 +78,7 @@ proc `$`*(usu: UsuNode): string =
     ).join(" ")
     result.add "]"
   of UsuValue:
-    result = usuValueToStr(usu)
+    result = valueToStr(usu)
   of UsuMap:
     result.add "{"
     result.add collect(
