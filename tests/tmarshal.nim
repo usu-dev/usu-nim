@@ -92,7 +92,7 @@ suite "unmarshal":
     check A(opt: none(B)) == parseUsu("""
       .opt null
     """).to(A)
-  
+
   test "usu node":
     type A = object
       usu: UsuNode
@@ -141,6 +141,24 @@ suite "marshal":
       usu: UsuNode
     const a = A(usu: newUsuValue("some usu"))
     check parseUsu($a.toUsu()).to(A) == a
+
+  test "escaped keys":
+    type A = object
+      `type`: string
+      # keys don't maintain spaces in the fields iterator
+      `key with space`: string
+      `key.with.period`: string
+
+    const a = A(`type`: "type", `key with space`: "val with space", `key.with.period`: "val.with.period")
+    check parseUsu($a.toUsu()).to(A) == a
+
+    let map =
+      newUsuMap(
+        {"key with space": newUsuValue("val with space"),
+        "key.with.space": newUsuValue("val.with.period")}
+      )
+    check parseUsu($map) == map
+
 
 # ---
 type EnvVar = distinct string

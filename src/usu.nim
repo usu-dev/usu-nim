@@ -16,6 +16,12 @@ proc hasKeyLikeWord(s: string): bool =
       return true
     prev = c
 
+proc escapeKey(s: string): string =
+  if "." notin s and " " notin s:
+    return s
+  else:
+    return "\"" & s & "\""
+
 proc escapeValue(s: string, prefix = "\"", suffix = "\""): string =
   ## replaces " by \"
   ## adds prefix and suffix
@@ -56,7 +62,7 @@ proc `$`*(usu: UsuNode): string =
   of UsuMap:
     result.add "{"
     result.add collect(
-      for k, v in usu.fields: "." & k & " " & $v
+      for k, v in usu.fields: "." & escapeKey(k) & " " & $v
     ).join(" ")
     result.add "}"
 
