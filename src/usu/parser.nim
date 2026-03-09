@@ -1,4 +1,4 @@
-import std/[tables, deques, strutils, strformat]
+import std/[tables, deques, strutils, strformat, sequtils, strscans]
 
 import lexer
 export tables, UsuParserError
@@ -62,6 +62,7 @@ template error(token: Token, msg = "", suffix = "") =
 
   raise newException(UsuParserError, message & " at pos: " & $token.pos)
 
+
 proc newUsuValue(t: Token): UsuNode = 
   case t.kind
   of tokString:
@@ -74,15 +75,58 @@ proc newUsuNull(t: Token): UsuNode =
     result = UsuNode(kind: UsuNull)
   else: error(t, "expected tokNull")
 
+type
+  Key = object
+    indexed: bool
+    idx: int
+    name: string
+
+
+proc parseIndex(name: string): (string, int) =
+  var key: string
+  var idx: int
+  if scanf(name, "$w[$i]", key, idx):
+    if idx < 0:
+      raise newException(UsuParserError, fmt("failed to extract index from key \"{key}\", index can't be negative"))
+    return (key, idx)
+  else:
+    raise newException(UsuParserError, fmt("failed to extract index from key \"{name}\""))
+
+proc init(_: typedesc[Key], name: string): Key =
+  if '[' in name:
+    result.indexed = true
+    let (key, idx) = parseIndex(name)
+    result.idx = idx
+    result.name = key
+  else:
+    result.name = name
+
+proc contains(
+  node: UsuNode,
+  key: Key,
+): bool =
+  assert node.kind == UsuMap
+  key.name in node.fields
+
+proc `[]`(node: var UsuNode, key: Key): var UsuNode =
+  node.fields[key.name]
+
+proc `[]=`(node: var UsuNode, key: Key, val: UsuNode) =
+  node.fields[key.name] = val
+
 proc pop(d: var Deque[Token]): Token {.inline.} = popFirst d
 
 proc parse(tokens: var Deque[Token], root: bool = false): UsuNode
 
-proc toUsuMap(path: seq[string], value: UsuNode): UsuNode =
-  if path.len > 1:
-    result = newUsuMap({path[0]: toUsuMap(path[1..^1], value)})
-  else:
-    result = newUsuMap({path[0]: value})
+# TODO: toUsuArray(idx: int, val: UsuNode)
+
+# TODO: use Key + index to inform creation
+# proc toUsuMap(path: seq[Key], value: UsuNode): UsuNode {.deprecated.}=
+#   # TODO: index means newUsuArray then toUsuMap...
+#   if path.len > 1:
+#     result = newUsuMap({path[0].name: toUsuMap(path[1..^1], value)})
+#   else:
+#     result = newUsuMap({path[0].name: value})
 
 proc deepMerge[K, V](target: var OrderedTable[K, V], source: OrderedTable[K, V]) =
   for key, value in source:
@@ -96,29 +140,88 @@ proc deepMerge[K, V](target: var OrderedTable[K, V], source: OrderedTable[K, V])
     else:
       target[key] = value
 
-proc nestedUpdate(node: var UsuNode, path: seq[string], value: UsuNode, token: Token) =
-  let curr = path[0]
-  if path.len == 1:
-    if curr in node.fields:
-      # TODO: better error
-      if node.fields[curr].kind != value.kind:
-        error(token,
-          fmt"""failed to merge values for repeated key: "{curr}", kinds must match expected: "{node.fields[curr].kind}", but got: "{value.kind}""""
-        )
-      case node.fields[curr].kind:
-      of UsuMap:
-        node.fields[curr].fields.deepMerge(value.fields)
-      of UsuArray:
-        node.fields[curr].elems.add value.elems
-      of UsuValue, UsuNull:
-        node.fields[curr] = value
-    else:
-      node.fields[curr] = value
+
+
+proc toUsuArray(val: UsuNode, idx: int): UsuNode =
+  if idx != 0:
+    result = newUsuArray(newUsuNull().repeat(idx+1))
+    result.elems[idx] = val
   else:
-    if curr in node.fields:
-      node.fields[curr].nestedUpdate(path[1..^1], value, token)
+    result = newUsuArray(val)
+
+proc toUsuNode(path: seq[Key], value: UsuNode): UsuNode
+
+proc toUsuNode(
+  key: Key,
+  path: seq[Key],
+  value: UsuNode,
+): UsuNode =
+  ## generate a value to be set for key if a key has an index then the return type will be array
+  if key.indexed:
+    result = toUsuArray(toUsuNode(path[1..^1], value), key.idx)
+  else:
+    result = toUsuNode(path[1..^1], value)
+
+proc toUsuNode(
+  path: seq[Key],
+  value: UsuNode
+): UsuNode =
+  let curr = path[0]
+  if path.len > 1:
+    result = newUsuMap({curr.name: toUsuNode(curr, path, value)})
+  else:
+    if curr.indexed:
+      result = newUsuMap({path[0].name: toUsuArray(value, curr.idx)})
     else:
-      node.fields[curr] = toUsuMap(path[1..^1], value)
+      result = newUsuMap({path[0].name: value})
+
+proc nestedUpdate(node: var UsuNode, path: seq[Key], value: UsuNode, token: Token)
+
+proc updateArray(node: var UsuNode, key: Key, path: seq[Key], value: UsuNode, token: Token) =
+  assert node[key].kind == UsuArray
+  assert path.len >= 1
+  if node[key].elems.len < key.idx:
+    while node[key].elems.len < key.idx:
+      node[key].elems.add newUsuNull()
+    node[key].elems.add toUsuNode(path, value)
+  else:
+    nestedUpdate(node[key].elems[key.idx], path, value, token)
+
+proc nestedUpdate(node: var UsuNode, path: seq[Key], value: UsuNode, token: Token) =
+  assert node.kind == UsuMap
+
+  let key = path[0]
+
+  if path.len == 1: # final update
+    if key in node:
+      if node[key].kind != value.kind:
+        error(token,
+          fmt"""failed to merge values for repeated key: "{key.name}", kinds must match expected: "{node[key].kind}", but got: "{value.kind}""""
+        )
+      case node[key].kind:
+      of UsuMap:
+        node[key].fields.deepMerge(value.fields)
+      of UsuArray:
+        node[key].elems.add value.elems
+      of UsuValue, UsuNull:
+        node[key] = value
+    else:
+      if key.indexed:
+        node[key] = toUsuArray(value, key.idx)
+      else:
+        node[key] = value
+  else:
+    if key in node:
+      if node[key].kind == UsuArray:
+        if not key.indexed:
+          error token, "failed to merge map with array"
+        echo key, path
+        node.updateArray(key, path[1..^1], value, token) # should updateArray be a special case of 'nestedUpdate?'
+      else:
+        node[key].nestedUpdate(path[1..^1], value, token)
+    else:
+      node[key] = toUsuNode(key, path, value)
+
 
 func splitEscapedPath(token: Token): seq[string] =
   let key = token.keyVal
@@ -155,6 +258,12 @@ func splitPath(token: Token): seq[string] =
   else:
     return splitEscapedPath(token)
 
+func getPath(token: Token): seq[Key] =
+  if token.kind != tokKey:
+    error(token, "expected tokKey")
+  for key in token.splitPath:
+    result.add Key.init(key)
+
 proc parseMap(tokens: var Deque[Token]): UsuNode =
   var currTok: Token
   result = UsuNode(kind: UsuMap)
@@ -166,20 +275,19 @@ proc parseMap(tokens: var Deque[Token]): UsuNode =
       error(currTok, suffix = "while parsing map")
     of tokKey:
       let nextToken = peekFirst tokens
-      let paths = currTok.splitPath
+      let path = getPath(currTok)
       let value =
         case nextToken.kind
         of tokString: newUsuValue(pop(tokens))
         of tokLBracket, tokLCurly: parse(tokens)
         of tokNull:
-          discard pop(tokens)
-          newUsuNull()
+          pop(tokens).newUsuNull()
         else:
           error(nextToken, suffix = "expected value")
       if currTok.append:
-        nestedUpdate(result, paths, newUsuArray(value), nextToken)
+        nestedUpdate(result, path, newUsuArray(value), nextToken)
       else:
-        nestedUpdate(result, paths, value, nextToken)
+        nestedUpdate(result, path, value, nextToken)
 
 proc parseArray(tokens: var Deque[Token]): UsuNode =
   var currTok: Token
