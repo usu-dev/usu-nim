@@ -188,6 +188,10 @@ proc lexKey(l: var Lexer) =
   elif l.curr & l.next == " >":
     l.set ChompNewLines
     inc(l, 2)
+  elif l.curr == ' ':
+    l.skip(whitespaces)
+    if l.next == '\n':
+      l.set RespectNewLines
 
 proc lexQuotedVal(l: var Lexer, raw = false) =
   let quote = l.curr
@@ -212,7 +216,7 @@ proc lexQuotedVal(l: var Lexer, raw = false) =
 # TODO: reduce allocations and string processing/stripping
 proc lexUnquotedVal(l: var Lexer) =
   var str = ""
-  var hadNewLine = false
+  var useNewLine = false
   var start = l.pos
 
   template stop: bool =
@@ -231,7 +235,7 @@ proc lexUnquotedVal(l: var Lexer) =
     if not l.lastWasKey:
       if l.isSet(InlineString):
         if l.curr in whitespaces: break
-      elif l.atEol: hadNewLine = true; break
+      elif l.atEol: useNewLine = true; break
 
   for c in str:
     if c in whitespaces: inc start
@@ -241,14 +245,14 @@ proc lexUnquotedVal(l: var Lexer) =
     str = strip(str)
   else:
     str = dedent(str)
-    hadNewLine = str.endsWith('\n')
+    useNewLine = str.endsWith('\n') and (str.len > 2 and '\n' in str[0..^2])
 
   str = strip(str, chars = whitespaces + NewLines)
   if str == "": return
   str = subEscapeSeqs(str)
   if l.isSet(ChompNewLines):
     str = str.splitLines().join(" ")
-  elif l.isSet(RespectNewlines) and hadNewLine:
+  elif l.isSet(RespectNewlines) and useNewLine:
     str.add "\n"
 
   if str == "null":
