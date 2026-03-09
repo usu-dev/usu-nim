@@ -46,7 +46,6 @@ proc subEscapeSeqs(s: string): string =
         "\\n": "\n",
         "\\t": "\t",
         "\\\\": "\\",
-        "\\\"": "\""
       }
   )
 
@@ -178,7 +177,7 @@ proc lexKey(l: var Lexer) =
       l.inc
     l.inc
   else:
-    while l.curr notin Newlines + {' ', '}'} and not l.atEof: 
+    while l.curr notin Newlines + {' ', '}'} and not l.atEof:
       key.add(l.curr)
       l.inc
   l.add newTokKey(start, key)
@@ -209,7 +208,7 @@ proc lexQuotedVal(l: var Lexer, raw = false) =
   if str.startswith("\n") or str.startsWith("\r\n"):
     str = dedent(str).strip(trailing=false)
   if not raw:
-    str = subEscapeSeqs(str)
+    str = str.replace("\\" & quote, $quote).subEscapeSeqs()
   l.add newTokString(start, str)
 
 
