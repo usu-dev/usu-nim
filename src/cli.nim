@@ -7,4 +7,7 @@ if (commandLineParams().len) != 1:
   quit 1
 let usuFile = commandLineParams()[0]
 let usuStr = readFile(usuFile)
-echo pretty( %* parseUsu(usuStr))
+let u = parseUsu(usuStr)
+# echo pretty(u)
+echo pretty(%* u)
+

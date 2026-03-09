@@ -2,6 +2,7 @@
 import ./[
   tusu,
   tofficial,
-  tmarshal
+  tmarshal,
+  tpretty
 ]
 
