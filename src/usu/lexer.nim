@@ -139,7 +139,6 @@ proc skipComment(l: var Lexer) =
   else:
     while l.curr notin NewLines:
       inc l
-    inc l
 
 func addBracket(l: var Lexer) =
   let kind = case l.curr
@@ -162,6 +161,26 @@ func lexBracket(l: var Lexer) =
   of '\x00': discard
   else: assert false
 
+proc postKey(l: var Lexer) =
+  ## determine parsing mode for subsequent value
+
+  if l.atEol:
+    l.set RespectNewlines
+  elif l.curr & l.next == " >":
+    l.set ChompNewLines
+    inc(l, 2)
+  elif l.curr == ' ':
+    while l.curr in whitespaces:
+      inc l
+    case l.curr
+    of '\n':
+      l.set RespectNewLines
+    of '#':
+      l.skipComment
+      if l.curr == '\n':
+        l.set RespectNewLines
+    else: discard
+
 proc lexKey(l: var Lexer) =
   var key = ""
   let start = l.pos
@@ -181,16 +200,7 @@ proc lexKey(l: var Lexer) =
       key.add(l.curr)
       l.inc
   l.add newTokKey(start, key)
-
-  if l.atEol:
-    l.set RespectNewlines
-  elif l.curr & l.next == " >":
-    l.set ChompNewLines
-    inc(l, 2)
-  elif l.curr == ' ':
-    l.skip(whitespaces)
-    if l.next == '\n':
-      l.set RespectNewLines
+  postKey l
 
 proc lexQuotedVal(l: var Lexer, raw = false) =
   let quote = l.curr
@@ -211,6 +221,9 @@ proc lexQuotedVal(l: var Lexer, raw = false) =
     str = str.replace("\\" & quote, $quote).subEscapeSeqs()
   l.add newTokString(start, str)
 
+proc keepNewLineEnd(s: string): bool =
+  if s[^1] != '\n': return false
+  '\n' in s.strip(trailing=true)
 
 # TODO: reduce allocations and string processing/stripping
 proc lexUnquotedVal(l: var Lexer) =
@@ -244,10 +257,11 @@ proc lexUnquotedVal(l: var Lexer) =
     str = strip(str)
   else:
     str = dedent(str)
-    useNewLine = str.endsWith('\n') and (str.len > 2 and '\n' in str[0..^2])
+    useNewLine = keepNewLineEnd(str)
 
   str = strip(str, chars = whitespaces + NewLines)
   if str == "": return
+
   str = subEscapeSeqs(str)
   if l.isSet(ChompNewLines):
     str = str.splitLines().join(" ")
