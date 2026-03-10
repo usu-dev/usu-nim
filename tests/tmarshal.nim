@@ -78,7 +78,7 @@ suite "unmarshal":
     check list == parseUsu("[Red Blue Green]").to(seq[Color])
     expect(ValueError):
       check @[Red, Blue, Green] == parseUsu("[Yellow]").to(seq[Color])
-    check $toUsu(list) == $parseUsu("[Red Blue Green]")
+    check toUsu(list) == parseUsu("[Red Blue Green]")
 
   test "optionals":
     type B = object
