@@ -93,6 +93,12 @@ suite "unmarshal":
       .opt null
     """).to(A)
 
+  test "numbers":
+    type A = object
+      i: int
+      f: float
+    check parseUsu(".i -2 .f 100_000.0").to(A) == A(i: -2, f: 100000.0)
+
   test "usu node":
     type A = object
       usu: UsuNode
@@ -189,7 +195,6 @@ type
 
 proc postFromUsu(v: var ObjWithHook) =
   v.post = v.value & "bar"
-
 
 suite "customize":
   test "custom unmarshaling":
