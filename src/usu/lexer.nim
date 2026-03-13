@@ -12,7 +12,9 @@ type
     pos*: int ## start position of the token
     case kind*: TokenKind
     of tokString: stringVal*: string
-    of tokKey: keyVal*: string
+    of tokKey:
+      keyVal*: string
+      append*: bool
     else: discard
   LexerMode = enum
     ChompNewlines, InlineString, RespectNewlines
@@ -30,8 +32,8 @@ const CloseBrackets = {'}', ']'}
 const Brackets = OpenBrackets + CloseBrackets
 const Syntax = Brackets + {'.', '>', '#'}
 
-proc newTokKey(pos: int, val: string): Token =
-  Token(kind: tokKey, pos: pos, keyVal: val)
+proc newTokKey(pos: int, val: string, append: bool): Token =
+  Token(kind: tokKey, pos: pos, keyVal: val, append: append)
 
 proc newTokString(pos: int, val: string): Token =
   Token(kind: tokString, pos: pos, stringVal: val)
@@ -199,7 +201,11 @@ proc lexKey(l: var Lexer) =
     while l.curr notin Newlines + {' ', '}'} and not l.atEof:
       key.add(l.curr)
       l.inc
-  l.add newTokKey(start, key)
+  if key.endsWith("+"):
+    key.setLen(key.len - 1)
+    l.add newTokKey(start, key, true)
+  else:
+    l.add newTokKey(start, key, false)
   postKey l
 
 proc lexQuotedVal(l: var Lexer, raw = false) =

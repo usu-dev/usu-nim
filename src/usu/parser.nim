@@ -38,6 +38,9 @@ proc newUsuNull*(): UsuNode =
 proc newUsuMap*(fields: openArray[(string, UsuNode)]): UsuNode =
    UsuNode(kind: UsuMap, fields: fields.toOrderedTable())
 
+proc newUsuArray(elems: varargs[UsuNode]): UsuNode =
+  UsuNode(kind: UsuArray, elems: @elems)
+
 template error(token: Token, msg = "", suffix = "") =
   ## Shortcut to raise an exception.
   var message = msg
@@ -173,8 +176,10 @@ proc parseMap(tokens: var Deque[Token]): UsuNode =
           newUsuNull()
         else:
           error(nextToken, suffix = "expected value")
-
-      nestedUpdate(result, paths, value, nextToken)
+      if currTok.append:
+        nestedUpdate(result, paths, newUsuArray(value), nextToken)
+      else:
+        nestedUpdate(result, paths, value, nextToken)
 
 proc parseArray(tokens: var Deque[Token]): UsuNode =
   var currTok: Token
