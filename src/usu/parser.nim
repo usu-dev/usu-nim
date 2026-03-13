@@ -65,7 +65,7 @@ proc newUsuValue(t: Token): UsuNode =
     result = newUsuValue(t.stringVal)
   else: error(t, "expected tokString")
 
-proc newUsuNull*(t: Token): UsuNode =
+proc newUsuNull(t: Token): UsuNode =
   case t.kind
   of tokNull:
     result = UsuNode(kind: UsuNull)
