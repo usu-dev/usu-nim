@@ -29,6 +29,22 @@ func `==`*(a, b: UsuNode): bool =
   of UsuMap:
     result = a.fields == b.fields
 
+proc `$`(u: UsuNode): string =
+  # minimal stringify for debugging purposes
+  case u.kind
+  of UsuMap:
+    result.add "{"
+    result.add u.fields.pairs.toSeq().mapIt($it[0] & ":" & $it[1]).join(",")
+    result.add "}"
+  of UsuArray:
+    result.add "["
+    result.add u.elems.toSeq().mapIt($it).join(",")
+    result.add "]"
+  of UsuValue:
+    result = escape(u.value)
+  of UsuNull: result = "null"
+
+
 proc newUsuValue*(s: string): UsuNode =
   UsuNode(kind: UsuValue, value: s)
 
@@ -62,7 +78,6 @@ template error(token: Token, msg = "", suffix = "") =
 
   raise newException(UsuParserError, message & " at pos: " & $token.pos)
 
-
 proc newUsuValue(t: Token): UsuNode = 
   case t.kind
   of tokString:
@@ -76,10 +91,15 @@ proc newUsuNull(t: Token): UsuNode =
   else: error(t, "expected tokNull")
 
 type
+  KeyKind = enum
+    Plain, Index, Append
   Key = object
-    indexed: bool
-    idx: int
     name: string
+    case kind: KeyKind:
+    of Index:
+      idx: int
+    of Append, Plain:
+      nil
 
 
 proc parseIndex(name: string): (string, int) =
@@ -94,12 +114,15 @@ proc parseIndex(name: string): (string, int) =
 
 proc init(_: typedesc[Key], name: string): Key =
   if '[' in name:
-    result.indexed = true
+    result = Key(kind: Index)
     let (key, idx) = parseIndex(name)
     result.idx = idx
     result.name = key
+  elif name.endsWith("+"):
+    result = Key(kind: Append)
+    result.name = name[0..^2]
   else:
-    result.name = name
+    result = Key(kind: Plain, name: name)
 
 proc contains(
   node: UsuNode,
@@ -118,29 +141,22 @@ proc pop(d: var Deque[Token]): Token {.inline.} = popFirst d
 
 proc parse(tokens: var Deque[Token], root: bool = false): UsuNode
 
-# TODO: toUsuArray(idx: int, val: UsuNode)
-
-# TODO: use Key + index to inform creation
-# proc toUsuMap(path: seq[Key], value: UsuNode): UsuNode {.deprecated.}=
-#   # TODO: index means newUsuArray then toUsuMap...
-#   if path.len > 1:
-#     result = newUsuMap({path[0].name: toUsuMap(path[1..^1], value)})
-#   else:
-#     result = newUsuMap({path[0].name: value})
-
-proc deepMerge[K, V](target: var OrderedTable[K, V], source: OrderedTable[K, V]) =
+proc deepMerge(target: var OrderedTable[string, UsuNode], source: OrderedTable[string, UsuNode]) =
   for key, value in source:
     if target.hasKey(key):
-      # Check if both values are tables to recurse
-      # If they are, merge the nested tables
-      when compiles(deepMerge(target[key], value)):
-        deepMerge(target[key], value)
-      else:
-        target[key] = value # shallow merge (overrides target)
+      case target[key].kind
+      of UsuMap:
+        deepMerge(target[key].fields, value.fields)
+      of UsuValue, UsuNull:
+        target[key] = value
+      of UsuArray:
+        case value.kind
+        of UsuArray:
+          target[key].elems.add value.elems
+        else:
+          target[key].elems.add value
     else:
       target[key] = value
-
-
 
 proc toUsuArray(val: UsuNode, idx: int): UsuNode =
   if idx != 0:
@@ -157,10 +173,12 @@ proc toUsuNode(
   value: UsuNode,
 ): UsuNode =
   ## generate a value to be set for key if a key has an index then the return type will be array
-  if key.indexed:
+  case key.kind
+  of Index:
     result = toUsuArray(toUsuNode(path[1..^1], value), key.idx)
-  else:
+  of Plain:
     result = toUsuNode(path[1..^1], value)
+  of Append: assert false
 
 proc toUsuNode(
   path: seq[Key],
@@ -170,58 +188,87 @@ proc toUsuNode(
   if path.len > 1:
     result = newUsuMap({curr.name: toUsuNode(curr, path, value)})
   else:
-    if curr.indexed:
+    case curr.kind
+    of Index:
       result = newUsuMap({path[0].name: toUsuArray(value, curr.idx)})
+    of Append:
+      result = newUsuMap({path[0].name: toUsuArray(value, 0)})
     else:
       result = newUsuMap({path[0].name: value})
 
 proc nestedUpdate(node: var UsuNode, path: seq[Key], value: UsuNode, token: Token)
 
-proc updateArray(node: var UsuNode, key: Key, path: seq[Key], value: UsuNode, token: Token) =
-  assert node[key].kind == UsuArray
-  assert path.len >= 1
-  if node[key].elems.len < key.idx:
-    while node[key].elems.len < key.idx:
-      node[key].elems.add newUsuNull()
-    node[key].elems.add toUsuNode(path, value)
+proc merge(a: var UsuNode, b: UsuNode) =
+  if a.kind == UsuNull:
+    a = b
+    return
+  if a.kind != b.kind:
+    raise newException(UsuParserError, "can't merge nodes with mismatched kinds " & $a.kind & " != " & $b.kind)
+  case a.kind
+  of UsuMap:
+    a.fields.deepMerge(b.fields) # deep merge breaks expecations
+  of UsuArray:
+    a.elems.add b.elems
+  of UsuValue, UsuNull:
+    a = b
+
+proc expand(node: var UsuNode, idx: Natural) =
+  assert node.kind == UsuArray
+  while node.elems.len <= idx:
+    node.elems.add newUsuNull()
+
+template tryMerge(a: var UsuNode, b: UsuNode) =
+  try:
+    merge(a, b)
+  except:
+    case key.kind
+    of Index:
+      error(token, fmt"""failed to set value for key: "{key.name}" at index: {key.idx}, """ & getCurrentExceptionMsg())
+    else:
+      error(token, fmt"""failed to set value for key: "{key.name}", """ & getCurrentExceptionMsg())
+
+proc nestedUpdate(node: var UsuNode, key: Key, value: UsuNode, token: Token) =
+  if key in node:
+    case key.kind
+    of Append:
+      if node[key].kind != UsuArray:
+        error(token,
+          fmt"""failed to append values to key: "{key.name}", expected UsuArray, got "{node[key].kind}""""
+        )
+      node[key].elems.add value
+    of Index:
+      while node[key].elems.len <= key.idx:
+        node[key].elems.add newUsuNull()
+      trymerge(node[key].elems[key.idx], value)
+    of Plain:
+      trymerge(node[key], value)
   else:
-    nestedUpdate(node[key].elems[key.idx], path, value, token)
+    case key.kind
+    of Append:
+      node[key] = toUsuArray(value, 0)
+    of Index:
+      node[key] = toUsuArray(value, key.idx)
+    of Plain:
+      node[key] = value
 
 proc nestedUpdate(node: var UsuNode, path: seq[Key], value: UsuNode, token: Token) =
   assert node.kind == UsuMap
-
-  let key = path[0]
-
-  if path.len == 1: # final update
-    if key in node:
-      if node[key].kind != value.kind:
-        error(token,
-          fmt"""failed to merge values for repeated key: "{key.name}", kinds must match expected: "{node[key].kind}", but got: "{value.kind}""""
-        )
-      case node[key].kind:
-      of UsuMap:
-        node[key].fields.deepMerge(value.fields)
-      of UsuArray:
-        node[key].elems.add value.elems
-      of UsuValue, UsuNull:
-        node[key] = value
-    else:
-      if key.indexed:
-        node[key] = toUsuArray(value, key.idx)
-      else:
-        node[key] = value
+  if path.len == 1:
+    nestedUpdate(node, path[0], value, token)
   else:
+    let key = path[0]
     if key in node:
-      if node[key].kind == UsuArray:
-        if not key.indexed:
+      case key.kind
+      of Index:
+        if node[key].kind == UsuArray:
           error token, "failed to merge map with array"
-        echo key, path
-        node.updateArray(key, path[1..^1], value, token) # should updateArray be a special case of 'nestedUpdate?'
+        node[key].expand(key.idx)
+        nestedUpdate(node[key].elems[key.idx], path[1..^1], value, token)
+      of Append: assert false
       else:
-        node[key].nestedUpdate(path[1..^1], value, token)
+        nestedUpdate(node[key], path[1..^1], value, token)
     else:
       node[key] = toUsuNode(key, path, value)
-
 
 func splitEscapedPath(token: Token): seq[string] =
   let key = token.keyVal
@@ -261,8 +308,13 @@ func splitPath(token: Token): seq[string] =
 func getPath(token: Token): seq[Key] =
   if token.kind != tokKey:
     error(token, "expected tokKey")
-  for key in token.splitPath:
-    result.add Key.init(key)
+  let path = token.splitPath
+  for i, p in path:
+    let key = Key.init(p)
+    if key.kind == Append and i != path.len - 1:
+      error token,
+        "error in nested key path: " & $path & ", '+' is only supported on last key"
+    result.add key
 
 proc parseMap(tokens: var Deque[Token]): UsuNode =
   var currTok: Token
@@ -284,10 +336,7 @@ proc parseMap(tokens: var Deque[Token]): UsuNode =
           pop(tokens).newUsuNull()
         else:
           error(nextToken, suffix = "expected value")
-      if currTok.append:
-        nestedUpdate(result, path, newUsuArray(value), nextToken)
-      else:
-        nestedUpdate(result, path, value, nextToken)
+      nestedUpdate(result, path, value, nextToken)
 
 proc parseArray(tokens: var Deque[Token]): UsuNode =
   var currTok: Token
