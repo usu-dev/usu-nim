@@ -1,13 +1,36 @@
-import std/[json, os]
-import ./usu
-import ./usu/json
+import std/[json, parseopt, strutils]
+import
+  ./usu,
+  ./usu/json
 
-if (commandLineParams().len) != 1:
-  stderr.writeLine "expected positional argument for usu file"
-  quit 1
-let usuFile = commandLineParams()[0]
-let usuStr = readFile(usuFile)
-let u = parseUsu(usuStr)
-# echo pretty(u)
-echo pretty(%* u)
+var
+  usuFile: string
+  showJson: bool
+  showUsu: bool
+  settings: set[UsuPrettySettings]
 
+for kind, key, val in getopt():
+  case kind
+  of cmdArgument:
+    usuFile = key
+  of cmdLongOption:
+    case key
+    of "usu": showUsu = true
+    of "json": showJson = true
+    of "settings":
+      let setting = parseEnum[UsuPrettySettings](val)
+      settings.incl setting
+  of cmdShortOption:
+    quit "no short options"
+  of cmdEnd: assert false
+
+if usuFile == "":
+  quit "expected a file path"
+
+let u = parseUsu(readFile(usuFile))
+
+if showJson:
+  echo pretty(%* u)
+
+if showUsu:
+  echo pretty(u, settings = settings)
