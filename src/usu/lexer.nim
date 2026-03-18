@@ -182,24 +182,27 @@ proc postKey(l: var Lexer) =
         l.set RespectNewLines
     else: discard
 
+proc lexQuotedKeyPart(l: var Lexer, key: var string) =
+  let q = l.curr
+  l.inc
+  while l.curr != q:
+    # we need to escape periods to prevent path splitting in parser
+    if l.curr == '.':
+      key.add '\\'
+    key.add(l.curr)
+    l.inc
+
 proc lexKey(l: var Lexer) =
   var key = ""
   let start = l.pos
   l.inc
-  if l.curr in Quotes:
-    let q = l.curr
-    l.inc
-    while l.curr != q:
-      # we need to escape periods to prevent path splitting in parser
-      if l.curr == '.':
-        key.add '\\'
+  while l.curr notin Newlines + {' ', '}'} and not l.atEof:
+    if l.curr in Quotes:
+      l.lexQuotedKeyPart(key)
+    else:
       key.add(l.curr)
-      l.inc
     l.inc
-  else:
-    while l.curr notin Newlines + {' ', '}'} and not l.atEof:
-      key.add(l.curr)
-      l.inc
+
   l.add newTokKey(start, key)
   postKey l
 
@@ -262,8 +265,8 @@ proc lexUnquotedVal(l: var Lexer) =
 
   str = strip(str, chars = whitespaces + NewLines)
   if str == "": return
-
   str = subEscapeSeqs(str)
+
   if l.isSet(ChompNewLines):
     str = str.splitLines().join(" ")
   elif l.isSet(RespectNewlines) and useNewLine:

@@ -1,4 +1,4 @@
-import std/[sequtils, unittest]
+import std/[unittest, sequtils, os, sugar, algorithm]
 import usu
 
 suite "pretty":
@@ -37,4 +37,26 @@ suite "pretty":
         u.kind == UsuMap and "key3" in u.fields
       )
 
+let officialPath = currentSourcePath().parentDir / "official/cases"
+
+proc collectCases(p: string): seq[string] =
+  result = collect:
+    for kind, path in walkDir(p):
+      if kind == pcDir: path
+  sort result
+
+let passing = collectCases(officialPath / "pass")
+
+suite "pretty-official-default":
+  for path in passing:
+    test path.splitPath().tail:
+        let u = parseUsu(readFile(path / "in.usu"))
+        check u == parseUsu(pretty(u))
+
+for setting in UsuPrettySettings:
+  suite "pretty-official-" & $setting:
+    for path in passing:
+      test path.splitPath().tail:
+        let u = parseUsu(readFile(path / "in.usu"))
+        check u == parseUsu(pretty(u, settings= {setting}))
 

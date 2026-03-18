@@ -18,12 +18,14 @@ let failing = collectCases(officialPath / "fail")
 suite "official passing":
   for path in passing:
     test path.splitPath().tail:
-        check ( % parseUsu(readFile(path / "in.usu"))) == parseFile(path / "out.json")
+        let u = parseUsu(readFile(path / "in.usu"))
+        check u == parseUsu($u) # roundtrip
+        check (% u) == parseFile(path / "out.json")
 
 template checkError(path: string) =
   try:
     discard parseUsu(readFile(path / "in.usu"))
-    check false
+    check false # parsing should fail
   except UsuParserError as e:
     var message = readFile(path / "out.msg")
     message.stripLineEnd()

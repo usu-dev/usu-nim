@@ -10,7 +10,8 @@ import std/[sequtils, sets, strutils, tables, sugar]
 import ./usu/[parser, marshal]
 
 proc escapeKey(s: string): string =
-  if "." notin s and " " notin s:
+  const chars = toHashSet(['.', ' '])
+  if (s.toHashSet() * chars).len == 0:
     return s
   else:
     return "\"" & s & "\""
@@ -24,8 +25,9 @@ proc escapeValue(s: string, prefix = "`", suffix = "`"): string =
   for c in items(s):
     case c
     of '`': add(result, "\\`")
-    # of '\"': add(result, "\\\"")
+    of '\\': add(result, "\\\\")
     of '\n': add(result, "\\n")
+    of '\t': add(result,"\\t")
     else: add(result, c)
   add(result, suffix)
 
@@ -62,7 +64,7 @@ proc usuValueToStr(usu: UsuNode): string =
 proc valueToStr(usu: UsuNode): string =
   assert usu.kind == UsuValue
   let chars = usu.value.toSeq().toHashSet()
-  if len([' ', '\n'].toHashSet() * chars) > 0 :
+  if len([' ', '\n','\t','\\'].toHashSet() * chars) > 0 or usu.value.startsWith('.') or usu.value ==  "null":
     return escapeValue(usu.value)
   else:
     return usu.value
@@ -104,20 +106,24 @@ proc toPathPairs(u: UsuNode, parent: string): seq[PathPair] =
   of UsuValue, UsuNull:
     result.add (parent, u)
   of UsuArray:
+    if u.elems.len == 0:
+      return @[(parent, u)]
     for i, e in u.elems:
       let parent = parent & "[" & $i & "]"
       for (k, v) in e.toPathPairs(parent):
         result.add (k, v)
   of UsuMap:
+    if u.fields.len == 0:
+      return @[(parent, u)]
     for k, v in u.fields:
-      let path = parent & "." & k
+      let path = parent & "." & escapeKey(k)
       for (k, v) in v.toPathPairs(path):
         result.add (k, v)
 
 proc toPathPairs(u: UsuNode): seq[PathPair] =
   checkKind u, UsuMap
   for k, v in u.fields:
-    for (k, v) in v.toPathPairs(k):
+    for (k, v) in v.toPathPairs(escapeKey(k)):
       result.add (k, v)
 
 iterator flatten*(u: UsuNode): PathPair =
@@ -135,10 +141,16 @@ type
 proc prettyValueToStr(usu: UsuNode, count: Natural, settings:set[UsuPrettySettings]): string =
   assert usu.kind == UsuValue
   let v = usu.value
-  if v[0] in {'\'', '"', '`'} or hasKeyLikeWord(v) or hasSyntax(v):
+  if v[0] in {'\'', '"', '`', '.'} or hasKeyLikeWord(v) or hasSyntax(v) or v == "null":
+    return escapeValue(usu.value)
+  # should pretty use control sequences instead?
+  if (toHashSet(['\t', '\\']) * v.toHashSet()).len > 0:
     return escapeValue(usu.value)
   if v[^1] == '\n': # last newline will be added back by pretty when used as a key/val pair
-    return '\n' & indent(v.strip(), count)
+    if strutils.count(v, '\n') == 1:
+      return '\n' & indent(v[0..^2], count) & "\\n"
+    else:
+      return '\n' & indent(v.strip(), count)
   elif '\n' in v:
     # TODO: keep the newline nature of the string? but enclose with '\`'
     return escapeValue(v)
@@ -151,39 +163,56 @@ proc prettyImpl(
   u: UsuNode,
   indent: Natural = 0,
   settings: set[UsuPrettySettings] = {},
-  inline: (u: UsuNode) -> bool = (_: UsuNode) => false
+  inline: (u: UsuNode) -> bool = (_: UsuNode) => false,
+  root = false
 ): string =
+  case u.kind
+  of UsuArray:
+    if u.elems.len == 0:
+      return $u
+  of UsuMap:
+    if u.fields.len == 0:
+      return $u
+  else: discard
+  let childSettings = settings + {RootBrackets} # always use brackets for children
   if inline(u): return $u
   case u.kind:
   of UsuNull:
     result = "null"
   of UsuMap:
     var kvInd: int = indent
-    let childSettings = settings + {RootBrackets} # always use brackets for children
+    var multipleNewLineFinal: bool
     if RootBrackets in settings:
       kvInd += 2
       result.add "{\n"
     if Flatten in settings:
       for k, v in u.flatten:
+        let s = prettyImpl(v, kvInd, childSettings, inline)
         result.add ' '.repeat(kvInd)
-        result.add '.' & k & ' '
-        result.add prettyImpl(v, kvInd, childSettings, inline)
+        result.add '.' & k & ' ' # key's already escaped by flatten
+        result.add s
         result.add '\n'
+        if s.len > 0 and s[0] == '\n' and count(s, '\n') >= 1:
+          multipleNewLineFinal = true
     else:
       for k, v in u.fields:
+        let s = prettyImpl(v, kvInd, childSettings, inline)
         result.add ' '.repeat(kvInd)
-        result.add '.' & k & ' '
-        result.add prettyImpl(v, kvInd, childSettings, inline)
+        result.add '.' & escapeKey(k) & ' '
+        result.add s
         result.add '\n'
+        if s.len > 0 and s[0] == '\n' and count(s, '\n') >= 1:
+          multipleNewLineFinal = true
     if RootBrackets in settings:
       result.add ' '.repeat(indent)
       result.add '}'
     else:
-      result.setLen(result.len - 1) # workaround to remove last '\n' on maps
+      if not root or not multipleNewLineFinal:
+        result.setLen(result.len - 1) # workaround to remove last '\n' on maps
   of UsuArray:
     result.add "[\n"
     for v in u.elems:
-      result.add ' '.repeat(indent + 2) & prettyImpl(v, indent + 2, settings, inline)
+      result.add ' '.repeat(indent + 2) & prettyImpl(v, indent + 2, childSettings, inline)
       result.add '\n'
     result.add ' '.repeat(indent)
     result.add ']'
@@ -191,7 +220,7 @@ proc prettyImpl(
     if QuoteValues in settings:
       result = escapeValue(u.value)
     else:
-      result = prettyValueToStr(u, indent + 2, settings)
+      result = prettyValueToStr(u, indent + 2, childSettings)
 
 proc pretty*(
   u: UsuNode,
@@ -203,10 +232,11 @@ proc pretty*(
   ## `inline` will be called on all children objects and should return true to apply `$` to the node.
   ##
   ## Note: experimental, output may change in future versions
-  prettyImpl(u, indent = 0, settings = settings, inline = inline)
+  prettyImpl(u, indent = 0, settings = settings, inline = inline, root = true)
 
 proc pretty*(
   u: UsuNode,
   settings: set[UsuPrettySettings] = {},
 ): string =
-  prettyImpl(u, settings = settings)
+  prettyImpl(u, settings = settings, root = true)
+

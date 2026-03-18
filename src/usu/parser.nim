@@ -92,43 +92,64 @@ proc newUsuNull(t: Token): UsuNode =
 
 type
   KeyKind = enum
-    Plain, Index, Append
+    Plain, Index, Append, IndexOnly
   Key = object
     name: string
     case kind: KeyKind:
-    of Index:
+    of Index, IndexOnly:
       idx: int
     of Append, Plain:
       nil
 
+proc parseKeyWithIndices(input: string): (string, seq[int]) =
+  var
+    key: string
+    idx: int
+    pos: int
+    indices: seq[int]
 
-proc parseIndex(name: string): (string, int) =
-  var key: string
-  var idx: int
-  if scanf(name, "$w[$i]", key, idx):
-    if idx < 0:
+  # First grab the key
+  pos = input.find('[')
+  key = input[0..pos-1]
+
+  # Then grab each [N] block
+  while pos < input.len:
+    if scanf(input[pos..^1], "[$i]", idx):
+      inc pos, ($idx).len + 2
+      indices.add(idx)
+    else:
+      break
+
+  if indices.anyIt(it < 0):
       raise newException(UsuParserError, fmt("failed to extract index from key \"{key}\", index can't be negative"))
-    return (key, idx)
-  else:
-    raise newException(UsuParserError, fmt("failed to extract index from key \"{name}\""))
+  if indices.len == 0:
+    raise newException(UsuParserError, fmt("failed to extract index from key \"{input}\""))
 
-proc init(_: typedesc[Key], name: string): Key =
+  return (key, indices)
+
+
+proc initKeys(name: string): seq[Key] =
   if '[' in name:
-    result = Key(kind: Index)
-    let (key, idx) = parseIndex(name)
-    result.idx = idx
-    result.name = key
+    # result = Key(kind: Index)
+    let (key, idxs) = parseKeyWithIndices(name)
+    result.add Key(kind: Index, idx: idxs[0], name: key)
+    if idxs.len > 1:
+      for i in idxs[1..^1]:
+        result.add Key(kind: IndexOnly, idx: i)
   elif name.endsWith("+"):
-    result = Key(kind: Append)
-    result.name = name[0..^2]
+    result.add Key(kind: Append, name: name[0..^2])
   else:
-    result = Key(kind: Plain, name: name)
+    result.add Key(kind: Plain, name: name)
+
+
+
 
 proc contains(
   node: UsuNode,
   key: Key,
 ): bool =
   assert node.kind == UsuMap
+  assert key.name != "" # empty keys are not allowed
   key.name in node.fields
 
 proc `[]`(node: var UsuNode, key: Key): var UsuNode =
@@ -174,7 +195,7 @@ proc toUsuNode(
 ): UsuNode =
   ## generate a value to be set for key if a key has an index then the return type will be array
   case key.kind
-  of Index:
+  of Index, IndexOnly:
     result = toUsuArray(toUsuNode(path[1..^1], value), key.idx)
   of Plain:
     result = toUsuNode(path[1..^1], value)
@@ -186,11 +207,17 @@ proc toUsuNode(
 ): UsuNode =
   let curr = path[0]
   if path.len > 1:
-    result = newUsuMap({curr.name: toUsuNode(curr, path, value)})
+    case curr.kind
+    of IndexOnly:
+      result = toUsuArray(toUsuNode(path[1..^1], value), curr.idx)
+    else:
+      result = newUsuMap({curr.name: toUsuNode(curr, path, value)})
   else:
     case curr.kind
     of Index:
       result = newUsuMap({path[0].name: toUsuArray(value, curr.idx)})
+    of IndexOnly:
+      result = toUsuArray(value, curr.idx)
     of Append:
       result = newUsuMap({path[0].name: toUsuArray(value, 0)})
     else:
@@ -224,10 +251,22 @@ template tryMerge(a: var UsuNode, b: UsuNode) =
     case key.kind
     of Index:
       error(token, fmt"""failed to set value for key: "{key.name}" at index: {key.idx}, """ & getCurrentExceptionMsg())
+    of IndexOnly:
+      error(token, fmt"""failed to set value at index: {key.idx}, """ & getCurrentExceptionMsg())
     else:
       error(token, fmt"""failed to set value for key: "{key.name}", """ & getCurrentExceptionMsg())
 
 proc nestedUpdate(node: var UsuNode, key: Key, value: UsuNode, token: Token) =
+  if key.kind == IndexOnly:
+    if node.kind == UsuNull:
+      node = toUsuArray(value, key.idx)
+    else:
+      node.expand(key.idx)
+      node.elems[key.idx] = value
+    return
+  if node.kind == UsuNull:
+    node = UsuNode(kind: UsuMap)
+
   if key in node:
     case key.kind
     of Append:
@@ -242,8 +281,12 @@ proc nestedUpdate(node: var UsuNode, key: Key, value: UsuNode, token: Token) =
       trymerge(node[key].elems[key.idx], value)
     of Plain:
       trymerge(node[key], value)
+    of IndexOnly: assert false
   else:
     case key.kind
+    of IndexOnly:
+      assert node.kind == UsuArray
+      tryMerge(node.elems[key.idx], value)
     of Append:
       node[key] = toUsuArray(value, 0)
     of Index:
@@ -252,23 +295,29 @@ proc nestedUpdate(node: var UsuNode, key: Key, value: UsuNode, token: Token) =
       node[key] = value
 
 proc nestedUpdate(node: var UsuNode, path: seq[Key], value: UsuNode, token: Token) =
-  assert node.kind == UsuMap
+  let key = path[0]
+
+
   if path.len == 1:
-    nestedUpdate(node, path[0], value, token)
+    nestedUpdate(node, key, value, token)
+    return
+
+  if node.kind == UsuNull:
+    node = UsuNode(kind: UsuMap)
+  if key notin node:
+    node[key] = toUsuNode(key, path, value)
+    return
+
+  case key.kind
+  of Index: # consume key and update at index
+    if node[key].kind != UsuArray:
+      # TODO: better error
+      error token, "failed to merge map with array"
+    node[key].expand(key.idx)
+    nestedUpdate(node[key].elems[key.idx], path[1..^1], value, token)
+  of Append: assert false
   else:
-    let key = path[0]
-    if key in node:
-      case key.kind
-      of Index:
-        if node[key].kind == UsuArray:
-          error token, "failed to merge map with array"
-        node[key].expand(key.idx)
-        nestedUpdate(node[key].elems[key.idx], path[1..^1], value, token)
-      of Append: assert false
-      else:
-        nestedUpdate(node[key], path[1..^1], value, token)
-    else:
-      node[key] = toUsuNode(key, path, value)
+    nestedUpdate(node[key], path[1..^1], value, token)
 
 func splitEscapedPath(token: Token): seq[string] =
   let key = token.keyVal
@@ -310,11 +359,11 @@ func getPath(token: Token): seq[Key] =
     error(token, "expected tokKey")
   let path = token.splitPath
   for i, p in path:
-    let key = Key.init(p)
-    if key.kind == Append and i != path.len - 1:
-      error token,
-        "error in nested key path: " & $path & ", '+' is only supported on last key"
-    result.add key
+    for key in initKeys(p):
+      if key.kind == Append and i != path.len - 1:
+        error token,
+          "error in nested key path: " & $path & ", '+' is only supported on last key"
+      result.add key
 
 proc parseMap(tokens: var Deque[Token]): UsuNode =
   var currTok: Token
@@ -379,7 +428,10 @@ proc parseUsu*(input: string): UsuNode =
   result = parse(tokens, root = true)
 
 when isMainModule:
-  const input = ".`level1.level2.level3` value"
+  const input = """
+."key with space"."key with period." value with period.
+"""
+
   echo lex(input)
   var tokens = toDeque(lex(input))
   echo parse(tokens, root = true)
