@@ -19,7 +19,7 @@ task docs, "Deploy doc html + search index to public/ directory":
       else: getCommit()
     srcFile = "src" / (name & ".nim")
     gitUrl = fmt"https://github.com/usu-dev/{name}-nim"
-  selfExec fmt"""doc --project --index:on --git.url:{gitUrl} --git.commit:"{tag}" --outdir:public {srcFile}"""
+  selfExec fmt"""doc --project --index:on --warning:LanguageXNotSupported:off --git.url:{gitUrl} --git.commit:"{tag}" --outdir:public {srcFile} """
   withDir "public":
     mvFile(name & ".html", "index.html")
     for file in walkDirRec(".", {pcFile}):
