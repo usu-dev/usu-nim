@@ -1,29 +1,37 @@
-import std/[os, strformat]
+import std/[os, strutils, sequtils]
 
 task tests, "run tests":
   selfExec "c -r tests/tester.nim"
 
-proc getCommit(): string =
-  let (output, code) = gorgeEx("git rev-parse HEAD")
-  if code != 0:
-    quit output
-  return output
-
 const version {.define.} = ""
 
-task docs, "Deploy doc html + search index to public/ directory":
-  let
-    name = "usu"
-    tag =
-      when defined(version): version
-      else: getCommit()
-    srcFile = "src" / (name & ".nim")
-    gitUrl = fmt"https://github.com/usu-dev/{name}-nim"
-  selfExec fmt"""doc --project --index:on --warning:LanguageXNotSupported:off --git.url:{gitUrl} --git.commit:"{tag}" --outdir:public {srcFile} """
+proc getCommit(): string =
+  when defined(version): return version
+  let (output, code) = gorgeEx("git rev-parse HEAD")
+  if code != 0: quit output
+  return output
+
+proc fixUpDocs(name = "usu") =
   withDir "public":
     mvFile(name & ".html", "index.html")
     for file in walkDirRec(".", {pcFile}):
-      # As we renamed the file, we need to rename that in hyperlinks
-      exec(fmt"sed -i -r 's|{name}\.html|index.html|g' {file}")
-      # drop 'src/' from titles
-      exec(fmt"sed -i -r 's/<(.*)>src\//<\1>/' {file}")
+      writeFile(file):
+        readFile(file).multiReplace({
+          name &  ".html": "index.html", # fix renamed file links
+          ">src/": ">"                   # drop 'src/' from titles
+        })
+
+when defined(docs):
+  --project
+  --index:on
+  --warning:"LanguageXNotSupported:off"
+  --git.url:"https://github.com/usu-dev/usu-nim"
+  --outdir:public
+  switch("git.commit", getCommit())
+
+task docs, "build docs with fixup":
+  let cmd = "doc -d:docs $1 src/usu.nim" % [
+      (when defined(version): " -d:version:" & version else: "")
+    ]
+  selfExec cmd
+  fixUpDocs()
