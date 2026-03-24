@@ -8,7 +8,7 @@ The library's public surface has three concerns: parsing usu text into an AST,
 marshaling Nim values into that AST, and unmarshaling the AST back into Nim values.
 
 
-## The usu Language
+## usu language
 
 Understanding the parser's behavior requires understanding the language. This section
 covers the syntax rules that affect how `parseUsu` constructs its output.
@@ -103,7 +103,7 @@ All three support the same escape sequences inside them:
 | `\\`       | literal backslash    |
 | `\'`       | literal single quote |
 | `\"`       | literal double quote |
-| `\\``       | literal backtick |
+| ``\```       | literal backtick     |
 
 A quoted string that begins with a newline immediately after the opening quote is
 dedented — leading whitespace common to all lines is removed. This is useful for
@@ -201,7 +201,7 @@ When the same key appears more than once the parser merges, never replaces whole
 ### Array append operator
 
 The `+` suffix on a key explicitly appends a single value to an existing array.
-The key must already hold an array:
+If the key has already been set it must hold an array:
 
 ```usu
 .tags [nim]
