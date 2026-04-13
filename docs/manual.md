@@ -288,6 +288,55 @@ assert newUsuValue("x") == newUsuValue("x")
 assert newUsuValue("x") != newUsuNull()
 ```
 
+## Accessing Usu
+
+`usu-nim` provides a path-based getter to retrieve nested nodes. Paths use `.` to separate segments and `[N]` for array indices.
+
+```nim
+import usu
+
+let node = parseUsu("""
+.meta {
+  .title "A Simple Usu Document"
+}
+.numbers [10 20 30]
+""")
+
+# Get a nested value
+let title = node.get("meta.title").value
+assert title == "A Simple Usu Document"
+
+# Get an array element
+let second = node.get("numbers[1]").value
+assert second == "20"
+
+# Paths can start with an optional '.'
+assert node.get(".meta.title").value == "A Simple Usu Document"
+```
+
+If a path does not exist, a `KeyError` is raised.
+
+You can combine with `.to(T)` to unmarshal a specific sub-tree:
+
+```nim
+type Meta = object
+  title: string
+
+let meta = node.get("meta").to(Meta)
+assert meta.title == "A Simple Usu Document"
+```
+
+### Path Syntax
+
+- `.segment`: Map lookup.
+- `segment[N]`: Map lookup followed by array index.
+- `[N]`: Array index (if the current node is an array).
+
+If a key segment contains a literal `.` in the map, it must be escaped with `\.` in the path string:
+
+```nim
+let val = node.get(r"key\.with\.dots")
+```
 
 ## Serialization
 

@@ -17,6 +17,15 @@ type
     of UsuNull:
       nil
 
+template checkKind*(node: UsuNode, k: UsuNodeKind) =
+  if node.kind != k:
+    raise newException(UsuParserError, "Expected node kind: $1, got: $2, node: $3" % [$k, $node.kind, $node])
+
+template checkKind*(node: UsuNode, k: set[UsuNodeKind]) =
+  if node.kind notin k:
+    raise newException(UsuParserError, "Expected node kind: $1, got: $2, node: $3" % [$k, $node.kind, $node])
+
+
 func `==`*(a, b: UsuNode): bool =
   ## check two nodes for equality
   if a.kind != b.kind: return false
@@ -130,7 +139,6 @@ proc parseKeyWithIndices(input: string): (string, seq[int]) =
 
 proc initKeys(name: string): seq[Key] =
   if '[' in name:
-    # result = Key(kind: Index)
     let (key, idxs) = parseKeyWithIndices(name)
     result.add Key(kind: Index, idx: idxs[0], name: key)
     if idxs.len > 1:
@@ -140,9 +148,6 @@ proc initKeys(name: string): seq[Key] =
     result.add Key(kind: Append, name: name[0..^2])
   else:
     result.add Key(kind: Plain, name: name)
-
-
-
 
 proc contains(
   node: UsuNode,
@@ -319,46 +324,39 @@ proc nestedUpdate(node: var UsuNode, path: seq[Key], value: UsuNode, token: Toke
   else:
     nestedUpdate(node[key], path[1..^1], value, token)
 
-func splitEscapedPath(token: Token): seq[string] =
-  let key = token.keyVal
+func splitEscapedPath(path: string): seq[string] =
   var i = 0
-  while i < len(key):
-    var path = ""
+  while i < len(path):
+    var key = ""
     var start = i
-    while i < len(key):
-      case key[i]
+    while i < len(path):
+      case path[i]
       of '\\':
-        path.add key[start..i-1] & "."
+        key.add path[start..i-1] & "."
         inc i, 2
         start = i
       of '.':
-        path.add key[start..i-1]
+        key.add path[start..i-1]
         inc i; break
       else: inc i
-    if i == len(key):
-      path.add key[start..i-1]
+    if i == len(path):
+      key.add path[start..i-1]
+    result.add key
 
-    if path == "":
-      error(token, msg = "key value can't be empty")
-    else:
-      result.add path
-
-func splitPath(token: Token): seq[string] =
-  if token.kind != tokKey:
-    error(token, "expected tokKey")
-  let key = token.keyVal
-  if "." notin key:
-    return @[key]
-  elif "\\." notin key:
-    return key.split('.')
+func splitPath(path: string): seq[string] =
+  if "." notin path:
+    return @[path]
+  elif "\\." notin path:
+    return path.split('.')
   else:
-    return splitEscapedPath(token)
+    return splitEscapedPath(path)
 
 func getPath(token: Token): seq[Key] =
   if token.kind != tokKey:
     error(token, "expected tokKey")
-  let path = token.splitPath
+  let path = token.keyVal.splitPath
   for i, p in path:
+    if p == "": error(token,"key value can't be empty")
     for key in initKeys(p):
       if key.kind == Append and i != path.len - 1:
         error token,
@@ -427,12 +425,77 @@ proc parseUsu*(input: string): UsuNode =
   var tokens = toDeque lex(input)
   result = parse(tokens, root = true)
 
-when isMainModule:
-  const input = """
-."key with space"."key with period." value with period.
-"""
+proc pathToKeys(path: string): seq[Key] =
+  ## this proc is for use by getters
+  let path =
+    if path.startsWith("."): path[1..^1]
+    else: path
 
-  echo lex(input)
-  var tokens = toDeque(lex(input))
-  echo parse(tokens, root = true)
+  for i, p in path.splitPath:
+    if p == "":
+      raise newException(KeyError, "key value can't be empty")
+    for key in initKeys(p):
+      if key.kind == Append:
+        raise newException(KeyError, "append keys not supported in this context")
+      result.add key
+
+proc getNode(u: UsuNode, key: Key): UsuNode =
+  template checkMap() =
+    if u.kind != UsuMap:
+      raise newException(KeyError, "key: $#, expected UsuMap, got: $#" % [key.name, $u.kind])
+    if key.name notin u.fields:
+      raise newException(KeyError, "key: $#, does not exist in map" % key.name)
+  template checkBounds() =
+    if u.kind != UsuArray:
+      raise newException(KeyError, "key: $#, expected UsuArray, got: $#" % [key.name, $u.kind])
+    if u.elems.len - 1 < key.idx:
+      raise newException(KeyError, "index: $#, is out of bounds: $#..$#" % [$key.idx, $u.elems.low, $u.elems.high])
+
+  case key.kind
+  of Plain:
+    checkMap()
+    return u.fields[key.name]
+  of Index:
+    checkMap()
+    let u = u.fields[key.name]
+    checkBounds()
+    return u.elems[key.idx]
+  of IndexOnly:
+    checkBounds()
+    return u.elems[key.idx]
+  of Append: assert false
+
+
+proc getNode(u: UsuNode, path: seq[Key]): UsuNode =
+  if path.len == 1:
+    return getNode(u, path[0])
+  let key = path[0]
+  result = u.getNode(key).getNode(path[1..^1])
+
+proc getNode(u: UsuNode, path: string): UsuNode =
+  let keys = pathToKeys(path)
+  result = getNode(u, keys)
+
+proc get*(u: UsuNode, path: string): UsuNode =
+  ## retrieve a nested UsuNode using a path string
+  ##
+  ## Paths use `.` as a separator for map keys and `[N]` for array indices.
+  ## If a key contains a literal `.`, it must be escaped with `\.`.
+  ##
+  ## Examples:
+  ## ```nim
+  ## u.get("meta.title")
+  ## u.get("numbers[0]")
+  ## u.get("key\.with\.dots")
+  ## ```
+  ## Raises KeyError if the path does not exist.
+  u.getNode(path)
+
+proc `[]`*(u: UsuNode, key: string): UsuNode =
+  assert u.kind == UsuMap
+  u.fields[key]
+
+proc `[]`*(u: UsuNode, idx: Natural): UsuNode =
+  assert u.kind == UsuArray
+  u.elems[idx]
 

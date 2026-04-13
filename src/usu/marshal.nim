@@ -60,14 +60,6 @@ func toUsu*(t: tuple): UsuNode =
 func toUsu*(v: UsuNode): UsuNode =
   v
 
-template checkKind*(node: UsuNode, k: UsuNodeKind) =
-  if node.kind != k:
-    raise newException(UsuParserError, "Expected node kind: $1, got: $2, node: $3" % [$k, $node.kind, $node])
-
-template checkKind*(node: UsuNode, k: set[UsuNodeKind]) =
-  if node.kind notin k:
-    raise newException(UsuParserError, "Expected node kind: $1, got: $2, node: $3" % [$k, $node.kind, $node])
-
 proc fromUsu*(v: var UsuNode, node: UsuNode) =
   v = node
 proc fromUsu*(v: var int, node: UsuNode) =
@@ -178,3 +170,4 @@ proc fromUsu*[T: object | ref object](v: var T, node: UsuNode) =
 
 proc to*[T](node: UsuNode, t: typedesc[T]): T =
   fromUsu(result, node)
+
