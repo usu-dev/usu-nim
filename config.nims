@@ -11,22 +11,13 @@ proc getCommit(): string =
   if code != 0: quit output
   return output
 
-proc fixUpDocs(name = "usu") =
-  withDir "public":
-    mvFile(name & ".html", "index.html")
-    for file in walkDirRec(".", {pcFile}):
-      writeFile(file):
-        readFile(file).multiReplace({
-          name &  ".html": "index.html", # fix renamed file links
-          ">src/": ">"                   # drop 'src/' from titles
-        })
-
 when defined(docs):
   --project
   --index:on
   --warning:"LanguageXNotSupported:off"
   --git.url:"https://github.com/usu-dev/usu-nim"
   --outdir:public
+  --path:src
   switch("git.commit", getCommit())
 
 task docs, "build docs with fixup":
@@ -34,4 +25,4 @@ task docs, "build docs with fixup":
       (when defined(version): " -d:version:" & version else: "")
     ]
   selfExec cmd
-  fixUpDocs()
+  cpFile("public/usu.html", "public/index.html")
