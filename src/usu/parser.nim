@@ -120,7 +120,8 @@ proc parseKeyWithIndices(input: string): (string, seq[int]) =
   # First grab the key
   pos = input.find('[')
   key = input[0..pos-1]
-
+  if key.endsWith("+"):
+    raise newException(UsuParserError, fmt("failed to parse key \"{key}\", append keys can't have an index"))
   # Then grab each [N] block
   while pos < input.len:
     if scanf(input[pos..^1], "[$i]", idx):
