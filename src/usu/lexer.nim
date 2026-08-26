@@ -135,7 +135,10 @@ proc skipComment(l: var Lexer) =
   inc l
   if l.curr == '(':
     inc l
-    while (l.curr & l.next) != ")#": inc l
+    while (l.curr & l.next) != ")#":
+      inc l
+      if l.next == '\x00':
+        raise newException(UsuParserError, "expected end of block comment")
     inc l
   else:
     while l.curr notin NewLines:
